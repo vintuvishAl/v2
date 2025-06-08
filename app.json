@@ -9,14 +9,19 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.vintuvishal.v2",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.vintuvishal.v2"
     },
     "web": {
       "bundler": "metro",
@@ -43,6 +48,10 @@
       "eas": {
         "projectId": "1f15bd03-d733-4f3e-a5f8-6a7e3dd26945"
       }
+    },
+    "runtimeVersion": "1.0.0",
+    "updates": {
+      "url": "https://u.expo.dev/1f15bd03-d733-4f3e-a5f8-6a7e3dd26945"
     }
   }
 }
