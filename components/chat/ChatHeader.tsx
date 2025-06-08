@@ -6,15 +6,18 @@ interface ChatHeaderProps {
   onMenuPress: () => void;
   onSearchPress: () => void;
   onNewChatPress: () => void;
+  useAgent: boolean;
+  onToggleAgent: (enabled: boolean) => void;
 }
 
 export const ChatHeader: React.FC<ChatHeaderProps> = ({
   onMenuPress,
   onSearchPress,
   onNewChatPress,
-}) => {
-  return (
-    <View className="flex-row justify-start items-center px-6 py-4 bg-app-dark-background">
+  useAgent,
+  onToggleAgent,
+}) => {  return (
+    <View className="flex-row justify-between items-center px-6 py-4 bg-app-dark-background">
       <View className="flex-row space-x-6">
         <TouchableOpacity testID="all-chats-button" className="p-2" onPress={onMenuPress}>
           <Ionicons
@@ -45,6 +48,27 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
           />
         </TouchableOpacity>
       </View>
+      
+      {/* Agent Toggle */}
+      <TouchableOpacity
+        testID="agent-toggle"
+        className={`px-3 py-2 rounded-lg flex-row items-center space-x-2 ${
+          useAgent ? 'bg-blue-600' : 'bg-gray-600'
+        }`}
+        onPress={() => onToggleAgent(!useAgent)}
+      >
+        <Ionicons
+          name={useAgent ? "calculator" : "chatbubble"}
+          size={16}
+          color="white"
+        />
+        <View className="w-1" />
+        <Ionicons
+          name="swap-horizontal"
+          size={12}
+          color="white"
+        />
+      </TouchableOpacity>
     </View>
   );
 };

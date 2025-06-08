@@ -9,6 +9,7 @@
  */
 
 import type * as agents from "../agents.js";
+import type * as auth from "../auth.js";
 import type * as chat from "../chat.js";
 import type * as http from "../http.js";
 import type * as userPreferences from "../userPreferences.js";
@@ -29,6 +30,7 @@ import type {
  */
 declare const fullApi: ApiFromModules<{
   agents: typeof agents;
+  auth: typeof auth;
   chat: typeof chat;
   http: typeof http;
   userPreferences: typeof userPreferences;

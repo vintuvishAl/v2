@@ -1,128 +1,169 @@
 // convex/agents.ts
-import { anthropic } from "@ai-sdk/anthropic";
-import { google } from "@ai-sdk/google";
 import { openai } from "@ai-sdk/openai";
 import { Agent, createTool } from "@convex-dev/agent";
+import { v } from "convex/values";
 import { z } from "zod";
 import { components } from "./_generated/api";
+import { action, mutation } from "./_generated/server";
 
-// MCP Tool definitions
-export const filesystemTool = createTool({
-  description: "Read and write files using the filesystem MCP server",
+// Create tools using the proper Convex agent framework
+export const calculatorTool = createTool({
+  description: "Perform mathematical calculations including basic arithmetic and exponentiation",
   args: z.object({
-    operation: z.enum(["read", "write", "list"]),
-    path: z.string().describe("The file or directory path"),
-    content: z.string().optional().describe("Content to write (for write operations)"),
+    expression: z.string().describe("Mathematical expression like '5 + 3', '10 * 2', '15 / 3', '2 ^ 4'"),
   }),
   handler: async (ctx, args): Promise<string> => {
-    // This will make HTTP requests to the filesystem MCP server
-    const mcpEndpoint = process.env.FILESYSTEM_MCP_ENDPOINT || "http://localhost:3001";
-    
-    const jsonRpcRequest = {
-      jsonrpc: "2.0",
-      method: `filesystem.${args.operation}`,
-      params: {
-        path: args.path,
-        ...(args.content && { content: args.content }),
-      },
-      id: 1,
-    };
-
     try {
-      const response = await fetch(`${mcpEndpoint}/rpc`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(jsonRpcRequest),
-      });
-
-      const result = await response.json();
+      // Simple pattern matching for basic math operations
+      const mathPattern = /(\d+\.?\d*)\s*([\+\-\*\/\^])\s*(\d+\.?\d*)/;
+      const match = args.expression.match(mathPattern);
       
-      if (result.error) {
-        return `Error: ${result.error.message}`;
+      if (!match) {
+        return "Invalid math expression format. Please use format like '5 + 3'";
       }
       
-      return JSON.stringify(result.result);
+      const [, a, operator, b] = match;
+      const numA = parseFloat(a);
+      const numB = parseFloat(b);
+      let result: number;
+      
+      switch (operator) {
+        case '+':
+          result = numA + numB;
+          break;
+        case '-':
+          result = numA - numB;
+          break;
+        case '*':
+          result = numA * numB;
+          break;
+        case '/':
+          if (numB === 0) {
+            return "Division by zero is not allowed";
+          }
+          result = numA / numB;
+          break;
+        case '^':
+          result = Math.pow(numA, numB);
+          break;
+        default:
+          return "Unknown operation";
+      }
+      
+      return `🧮 **Calculation Result**\n${numA} ${operator} ${numB} = ${result}`;
     } catch (error) {
-      return `Failed to execute filesystem operation: ${error}`;
+      return `Error performing calculation: ${error instanceof Error ? error.message : String(error)}`;
     }
   },
 });
 
-export const webSearchTool = createTool({
-  description: "Search the web and fetch webpage content using the web MCP server",
+export const textUtilityTool = createTool({
+  description: "Perform text operations like counting words, counting characters, or reversing text",
   args: z.object({
-    operation: z.enum(["search", "fetch"]),
-    query: z.string().optional().describe("Search query (for search operations)"),
-    url: z.string().optional().describe("URL to fetch (for fetch operations)"),
+    operation: z.enum(["count_words", "count_characters", "reverse"]).describe("The text operation to perform"),
+    text: z.string().describe("The text to operate on"),
   }),
   handler: async (ctx, args): Promise<string> => {
-    const mcpEndpoint = process.env.WEB_MCP_ENDPOINT || "http://localhost:3002";
-    
-    const jsonRpcRequest = {
-      jsonrpc: "2.0",
-      method: `web.${args.operation}`,
-      params: {
-        ...(args.query && { query: args.query }),
-        ...(args.url && { url: args.url }),
-      },
-      id: 1,
-    };
-
     try {
-      const response = await fetch(`${mcpEndpoint}/rpc`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(jsonRpcRequest),
-      });
-
-      const result = await response.json();
-      
-      if (result.error) {
-        return `Error: ${result.error.message}`;
+      switch (args.operation) {
+        case "count_words":
+          const wordCount = args.text.split(/\s+/).filter(word => word.length > 0).length;
+          return `📝 **Word Count**\nText: "${args.text}"\nWord count: ${wordCount}`;
+        
+        case "count_characters":
+          return `📝 **Character Count**\nText: "${args.text}"\nCharacter count: ${args.text.length}`;
+        
+        case "reverse":
+          const reversed = args.text.split('').reverse().join('');
+          return `🔄 **Text Reversed**\nOriginal: "${args.text}"\nReversed: "${reversed}"`;
+        
+        default:
+          return "Unknown text operation";
       }
-      
-      return JSON.stringify(result.result);
     } catch (error) {
-      return `Failed to execute web operation: ${error}`;
+      return `Error performing text operation: ${error instanceof Error ? error.message : String(error)}`;
     }
   },
 });
 
-// Create different agents for different LLMs
-export function createAgent(llmProvider: string = "openai") {
-  let chat;
-  
-  switch (llmProvider) {
-    case "anthropic":
-      chat = anthropic("claude-3-5-sonnet-20241022");
-      break;
-    case "google":
-    case "gemini":
-      chat = google("gemini-1.5-pro-latest");
-      break;
-    case "openai":
-    default:
-      chat = openai("gpt-4o-mini");
-      break;
-  }
+// Create the main utility agent
+export const utilityAgent = new Agent(components.agent, {
+  chat: openai.chat("gpt-4o-mini"),
+  textEmbedding: openai.embedding("text-embedding-3-small"),
+  instructions: `You are a helpful utility assistant. You can help users with:
 
-  return new Agent(components.agent, {
-    chat,
-    textEmbedding: openai.embedding("text-embedding-3-small"),
-    instructions: `You are a helpful AI assistant with access to various tools. 
-    You can help users with file operations, web searches, and general questions.
-    When using tools, always explain what you're doing and provide clear results.
-    Be concise but informative in your responses.`,
-    tools: {
-      filesystem: filesystemTool,
-      webSearch: webSearchTool,
-    },
-    maxSteps: 5, // Allow multiple tool calls in a conversation
-    maxRetries: 3,
-  });
-}
+🧮 **Math Operations** - Use the calculator tool for arithmetic calculations
+📝 **Text Operations** - Use the text utility tool for text processing
 
-// Export specific agents
-export const openaiAgent = createAgent("openai");
-export const anthropicAgent = createAgent("anthropic");
-export const geminiAgent = createAgent("gemini");
+When users ask for math calculations, use the calculator tool.
+When users ask for text operations (word count, character count, reverse text), use the text utility tool.
+
+Be friendly and helpful in your responses.`,
+  tools: {
+    calculator: calculatorTool,
+    textUtility: textUtilityTool,
+  },
+  maxSteps: 3, // Allow multiple tool calls if needed
+});
+
+// Convex functions for agent interactions
+
+// Create a new thread for agent conversations
+export const createThread = mutation({
+  args: { 
+    userId: v.optional(v.string()),
+    title: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<{ threadId: string }> => {
+    const { threadId } = await utilityAgent.createThread(ctx, { 
+      userId: args.userId,
+    });
+    return { threadId };
+  },
+});
+
+// Generate text using the utility agent
+export const generateText = action({
+  args: { 
+    prompt: v.string(),
+    threadId: v.optional(v.string()),
+    userId: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<{ text: string; threadId: string }> => {
+    let threadId = args.threadId;
+    let thread;
+
+    if (threadId) {
+      // Continue existing thread
+      const result = await utilityAgent.continueThread(ctx, { threadId });
+      thread = result.thread;
+    } else {
+      // Create new thread
+      const result = await utilityAgent.createThread(ctx, { userId: args.userId });
+      threadId = result.threadId;
+      thread = result.thread;
+    }
+
+    const result = await thread.generateText({ prompt: args.prompt });
+    return { text: result.text, threadId };
+  },
+});
+
+// Get messages from a thread
+export const getMessages = action({
+  args: { threadId: v.string() },
+  handler: async (ctx, args) => {
+    const messages = await utilityAgent.listMessages(ctx, {
+      threadId: args.threadId,
+      paginationOpts: { cursor: null, numItems: 50 }
+    });
+    return messages.page;
+  },
+});
+
+// Expose agent actions using the framework's built-in methods
+export const agentTextAction = utilityAgent.asTextAction({
+  maxSteps: 3,
+});
+
+export const createThreadMutation = utilityAgent.createThreadMutation();

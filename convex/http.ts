@@ -2,33 +2,41 @@ import { PersistentTextStreaming } from "@convex-dev/persistent-text-streaming";
 import { httpRouter } from "convex/server";
 import { components } from "./_generated/api";
 import { httpAction } from "./_generated/server";
+import { auth } from "./auth";
 
 const persistentTextStreaming = new PersistentTextStreaming(components.persistentTextStreaming);
 
 const http = httpRouter();
 
 export const streamChat = httpAction(async (ctx, request) => {
-  const { streamId, prompt, model = "gemini-2.5-flash" } = await request.json();
+  const { streamId, prompt, model = "gemini-1.5-flash-latest", conversationHistory = [] } = await request.json();
   
   console.log("=== STREAM CHAT START ===");
   console.log("StreamId:", streamId);
   console.log("Model:", model);
   console.log("Prompt:", prompt.substring(0, 100) + "...");
+  console.log("Conversation history length:", conversationHistory.length);
   
   return persistentTextStreaming.stream(
     ctx,
     request,
     streamId,
     async (ctx, request, streamId, chunkAppender) => {
-      await streamWithOpenAIFormat(prompt, chunkAppender, model);
+      await streamWithOpenAIFormat(prompt, chunkAppender, model, conversationHistory);
     }
   );
 });
 
-async function streamWithOpenAIFormat(prompt: string, chunkAppender: (chunk: string) => Promise<void>, model: string) {
+async function streamWithOpenAIFormat(
+  prompt: string, 
+  chunkAppender: (chunk: string) => Promise<void>, 
+  model: string, 
+  conversationHistory: {role: string, content: string}[] = []
+) {
   console.log("=== STREAMING START ===");
   console.log("Model:", model);
-    let apiKey: string | undefined;
+  
+  let apiKey: string | undefined;
   let baseURL: string;
   let actualModel: string;
   
@@ -37,16 +45,16 @@ async function streamWithOpenAIFormat(prompt: string, chunkAppender: (chunk: str
     apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
     baseURL = "https://generativelanguage.googleapis.com/v1beta/openai/";
     
-    // Map our model names to Gemini API model names
+    // Map our model names to Gemini API model names (OpenAI-compatible endpoint)
     switch (model) {
-      case "gemini-2.5-flash":
-        actualModel = "gemini-2.0-flash-exp";
+      case "gemini-2.5-flash-preview":
+        actualModel = "models/gemini-2.5-flash-preview-05-20";
         break;
-      case "gemini-2.5-pro":
-        actualModel = "gemini-1.5-pro";
+      case "gemini-2.5-pro-preview":
+        actualModel = "models/gemini-2.5-pro-preview-06-05";
         break;
       default:
-        actualModel = "gemini-2.0-flash-exp";
+        actualModel = "models/gemini-2.5-flash-preview-05-20";
     }
     
     if (!apiKey) {
@@ -55,8 +63,6 @@ async function streamWithOpenAIFormat(prompt: string, chunkAppender: (chunk: str
     }
     
     console.log("Using Gemini via OpenAI compatibility");
-    console.log("Base URL:", baseURL);
-    console.log("Model:", actualModel);
   } else if (model.startsWith("gpt")) {
     // Use OpenAI directly
     apiKey = process.env.OPENAI_API_KEY;
@@ -80,27 +86,31 @@ async function streamWithOpenAIFormat(prompt: string, chunkAppender: (chunk: str
     }
     
     console.log("Using OpenAI directly");
-    console.log("Base URL:", baseURL);
-    console.log("Model:", actualModel);
   } else {
     await chunkAppender("Error: Unsupported model selected");
     return;
   }
-
   try {
+    // Build messages array with conversation history
+    const messages = [
+      ...conversationHistory.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      })),
+      {
+        role: "user",
+        content: prompt
+      }
+    ];
+
     const requestBody = {
       model: actualModel,
-      messages: [
-        {
-          role: "user",
-          content: prompt
-        }
-      ],
+      messages,
       stream: true,
       temperature: 0.7,
     };
     
-    console.log("Request body:", JSON.stringify(requestBody, null, 2));
+    console.log("Making API request to:", `${baseURL}chat/completions`);
     
     const response = await fetch(`${baseURL}chat/completions`, {
       method: "POST",
@@ -112,7 +122,6 @@ async function streamWithOpenAIFormat(prompt: string, chunkAppender: (chunk: str
     });
 
     console.log("Response status:", response.status);
-    console.log("Response headers:", Object.fromEntries(response.headers.entries()));
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -133,6 +142,7 @@ async function streamWithOpenAIFormat(prompt: string, chunkAppender: (chunk: str
 
     console.log("Starting to read stream...");
     let chunkCount = 0;
+    let buffer = "";
 
     while (true) {
       const { done, value } = await reader.read();
@@ -142,25 +152,24 @@ async function streamWithOpenAIFormat(prompt: string, chunkAppender: (chunk: str
       }
 
       chunkCount++;
-      const chunk = decoder.decode(value);
-      console.log(`Chunk ${chunkCount}:`, chunk.substring(0, 200));
-      const lines = chunk.split('\n');
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      
+      // Keep the last potentially incomplete line in the buffer
+      buffer = lines.pop() || "";
 
       for (const line of lines) {
         if (line.startsWith('data: ')) {
-          const data = line.slice(6);
+          const data = line.slice(6).trim();
           if (data === '[DONE]') continue;
           
           try {
             const parsed = JSON.parse(data);
-            console.log("Parsed data:", parsed);
             const content = parsed.choices?.[0]?.delta?.content;
             if (content) {
-              console.log("Content found:", JSON.stringify(content));
               await chunkAppender(content);
-            }
-          } catch (e) {
-            console.log("Error parsing data chunk:", e);
+            }          } catch {
+            // Skip invalid JSON chunks
             continue;
           }
         }
@@ -184,5 +193,8 @@ http.route({
   method: "POST", 
   handler: streamChat,
 });
+
+// Add authentication routes
+auth.addHttpRoutes(http);
 
 export default http;

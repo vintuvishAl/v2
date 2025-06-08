@@ -19,6 +19,7 @@ interface ChatInputProps {
   onAttachPress: () => void;
   selectedModel: ModelType;
   isCreatingChat: boolean;
+  useAgent?: boolean;
 }
 
 export const ChatInput: React.FC<ChatInputProps> = ({
@@ -30,6 +31,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   onAttachPress,
   selectedModel,
   isCreatingChat,
+  useAgent = false,
 }) => {
   return (
     <View className="bg-app-dark-background px-3 py-0">
@@ -47,9 +49,20 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           />
         </View>
         
-        {/* Model Info Bar - Separate section */}
-        <View className="flex-row items-center justify-between bg-app-dark-chat-bg  px-6 py-2 ">
+        {/* Model Info Bar - Separate section */}        <View className="flex-row items-center justify-between bg-app-dark-chat-bg  px-6 py-2 ">
           <View className="flex-row items-center space-x-4 gap-2">
+            {/* Agent Mode Indicator */}
+            {useAgent && (
+              <View className="flex-row items-center space-x-1 bg-blue-600 px-2 py-1 rounded">
+                <Ionicons
+                  name="calculator"
+                  size={14}
+                  color="white"
+                />
+                <Text className="text-white text-xs font-medium">Agent</Text>
+              </View>
+            )}
+            
             {/* Model Selection Button */}
             <TouchableOpacity
               className="flex-row items-center space-x-1 bg-app-dark-border px-3 py-2 rounded-lg"

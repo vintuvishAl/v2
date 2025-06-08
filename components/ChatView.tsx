@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from "react";
-import { Keyboard, KeyboardEvent, Platform, SafeAreaView, View } from "react-native";
-import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Keyboard, KeyboardEvent, SafeAreaView, ScrollView, View } from "react-native";
 import { useChat } from "../hooks/useChat";
 import { ChatHeader } from "./chat/ChatHeader";
+import { ChatHistoryModal } from "./chat/ChatHistoryModal";
 import { ChatInput } from "./chat/ChatInput";
 import { MessageList } from "./chat/MessageList";
 import { ModelSelectorModal } from "./chat/ModelSelectorModal";
@@ -15,24 +15,32 @@ interface ChatViewProps {
 const ChatView: React.FC<ChatViewProps> = ({ userName = "vishal" }) => {
   // Keyboard height state
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  
-  const {
-    // State
+  const scrollViewRef = useRef<ScrollView>(null);
+    const scrollToBottom = useCallback(() => {
+    scrollViewRef.current?.scrollToEnd({ animated: true });
+  }, []);
+
+  const {    // State
     messages,
     inputText,
     isCreatingChat,
     selectedModel,
     showModelModal,
-    
-    // Actions
+    showChatHistory,
+    useAgent,
+    chatHistory,
+      // Actions
     setInputText,
     setSelectedModel,
     setShowModelModal,
+    setShowChatHistory,
+    setUseAgent,
     handleSendMessage,
     handleSuggestedQuestion,
     startNewChat,
-  } = useChat(userName);
-
+    loadChat,
+    handleDeleteChat,
+  } = useChat(userName, scrollToBottom);
   // Listen to keyboard events
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
@@ -55,13 +63,22 @@ const ChatView: React.FC<ChatViewProps> = ({ userName = "vishal" }) => {
     };
   }, []);
 
+  // Auto-scroll to bottom when messages change or streaming
+  useEffect(() => {
+    if (messages.length > 0) {
+      const timer = setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [messages]);
+
   const handleActionButton = (action: string) => {
     // Handle action button press
     console.log(`${action} button pressed`);
   };
-
   const handleMenuPress = () => {
-    console.log("Menu pressed");
+    setShowChatHistory(true);
   };
 
   const handleSearchPress = () => {
@@ -75,29 +92,25 @@ const ChatView: React.FC<ChatViewProps> = ({ userName = "vishal" }) => {
   const handleAttachPress = () => {
     console.log("Attach pressed");
   };  return (
-    <SafeAreaView className="flex-1 bg-app-dark-background pt-5">
-      {/* Top Bar */}
+    <SafeAreaView className="flex-1 bg-app-dark-background pt-5">      {/* Top Bar */}
       <ChatHeader
         onMenuPress={handleMenuPress}
         onSearchPress={handleSearchPress}
         onNewChatPress={startNewChat}
-      />      {/* Main Content with Keyboard Aware Scroll */}      <KeyboardAwareScrollView
-        className="flex-1"
-        testID="chat-container"
-        contentContainerStyle={{ flexGrow: 1 }}
-        keyboardShouldPersistTaps="handled"
-        enableOnAndroid={true}
-        enableAutomaticScroll={true}
-        extraScrollHeight={keyboardHeight > 0 ? keyboardHeight + 50 : (Platform.OS === "ios" ? 250 : 220)}
-        showsVerticalScrollIndicator={false}
-        bounces={false}
-        resetScrollToCoords={{ x: 0, y: 0 }}
-        scrollEnabled={true}
-        keyboardOpeningTime={250}
-      >
-        {/* Messages Container */}
-        <View className="flex-1 px-8">
-          {messages.length === 0 ? (
+        useAgent={useAgent}
+        onToggleAgent={setUseAgent}
+      />      {/* Main Content Container */}
+      <View className="flex-1" style={{ paddingBottom: keyboardHeight }}>
+        {/* Messages Container with ScrollView */}
+        <ScrollView
+          ref={scrollViewRef}
+          className="flex-1 px-8"
+          testID="chat-container"
+          contentContainerStyle={{ flexGrow: 1, paddingBottom: 20 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+        >          {messages.length === 0 ? (
             <WelcomeScreen
               userName={userName}
               onActionPress={handleActionButton}
@@ -106,9 +119,9 @@ const ChatView: React.FC<ChatViewProps> = ({ userName = "vishal" }) => {
           ) : (
             <MessageList messages={messages} />
           )}
-        </View>
-        
-        {/* Bottom Input Bar - Inside KeyboardAwareScrollView */}
+        </ScrollView>
+
+        {/* Fixed Bottom Input Bar */}
         <ChatInput
           inputText={inputText}
           onInputChange={setInputText}
@@ -118,15 +131,26 @@ const ChatView: React.FC<ChatViewProps> = ({ userName = "vishal" }) => {
           onAttachPress={handleAttachPress}
           selectedModel={selectedModel}
           isCreatingChat={isCreatingChat}
+          useAgent={useAgent}
         />
-      </KeyboardAwareScrollView>
-      
-      {/* Model Selection Modal */}
+      </View>
+        {/* Model Selection Modal */}
       <ModelSelectorModal
         visible={showModelModal}
         selectedModel={selectedModel}
         onClose={() => setShowModelModal(false)}
         onModelSelect={setSelectedModel}
+      />
+      
+      {/* Chat History Modal */}
+      <ChatHistoryModal
+        visible={showChatHistory}
+        onClose={() => setShowChatHistory(false)}
+        chatHistory={chatHistory}
+        onChatSelect={loadChat}
+        onDeleteChat={handleDeleteChat}
+        onNewChat={startNewChat}
+        loading={chatHistory === undefined}
       />
     </SafeAreaView>
   );
