@@ -80,8 +80,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               />
             </TouchableOpacity>
             
-            {/* Globe Icon */}
-            <TouchableOpacity testID="globe-button" onPress={onGlobePress}>
+          
+            {/* <TouchableOpacity testID="globe-button" onPress={onGlobePress}>
               <Ionicons
                 name="globe-outline"
                 size={20}
@@ -90,7 +90,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               />
             </TouchableOpacity>
             
-            {/* Paperclip Icon */}
+           
             <TouchableOpacity testID="attach-button" onPress={onAttachPress}>
               <Ionicons
                 name="attach"
@@ -98,7 +98,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 className="text-app-dark-icon"
                 color={"#6b6b6b"}
               />
-            </TouchableOpacity>
+            </TouchableOpacity> */}
           </View>
           
           {/* Send Button */}

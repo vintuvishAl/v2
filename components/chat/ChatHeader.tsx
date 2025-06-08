@@ -27,14 +27,14 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
             color={"#1769aa"}
           />
         </TouchableOpacity>
-        <TouchableOpacity testID="search-button" className="p-2" onPress={onSearchPress}>
+        {/* <TouchableOpacity testID="search-button" className="p-2" onPress={onSearchPress}>
           <Ionicons
             name="search"
             size={24}
             className="text-app-dark-icon"
             color={"#1769aa"}
           />
-        </TouchableOpacity>
+        </TouchableOpacity> */}
         <TouchableOpacity
           testID="add-button"
           className="p-2"
