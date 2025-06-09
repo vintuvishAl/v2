@@ -27,6 +27,7 @@
     "@react-navigation/bottom-tabs": "^7.3.10",
     "@react-navigation/elements": "^2.3.8",
     "@react-navigation/native": "^7.1.6",
+    "@shopify/flash-list": "^1.8.2",
     "ai": "^4.3.16",
     "convex": "^1.24.8",
     "expo": "~53.0.10",

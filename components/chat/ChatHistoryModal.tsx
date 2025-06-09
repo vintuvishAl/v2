@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { FlatList, Modal, Text, TouchableOpacity, View } from "react-native";
+import { Modal, Text, TouchableOpacity, View } from "react-native";
+import { FlashList } from "@shopify/flash-list";
 import type { Id } from "../../convex/_generated/dataModel";
 
 interface ChatHistoryItem {
@@ -84,15 +85,12 @@ export const ChatHistoryModal: React.FC<ChatHistoryModalProps> = ({
       onRequestClose={onClose}
     >
       <View className="flex-1 bg-gray-900">
-        {/* Header */}
         <View className="flex-row justify-between items-center px-4 py-4 border-b border-gray-700">
           <Text className="text-white text-xl font-semibold">Chat History</Text>
           <TouchableOpacity onPress={onClose}>
             <Ionicons name="close" size={24} color="white" />
           </TouchableOpacity>
         </View>
-
-        {/* New Chat Button */}
         <TouchableOpacity
           className="flex-row items-center px-4 py-4 bg-blue-600 mx-4 mt-4 rounded-lg"
           onPress={handleNewChat}
@@ -100,8 +98,6 @@ export const ChatHistoryModal: React.FC<ChatHistoryModalProps> = ({
           <Ionicons name="add" size={20} color="white" />
           <Text className="text-white text-base font-medium ml-2">Start New Chat</Text>
         </TouchableOpacity>
-
-        {/* Chat List */}
         <View className="flex-1 mt-4">
           {loading ? (
             <View className="flex-1 justify-center items-center">
@@ -114,13 +110,13 @@ export const ChatHistoryModal: React.FC<ChatHistoryModalProps> = ({
               <Text className="text-gray-500 text-center">
                 Start a conversation to see your chat history here
               </Text>
-            </View>
-          ) : (
-            <FlatList
+            </View>          ) : (
+            <FlashList
               data={chatHistory}
               renderItem={renderChatItem}
               keyExtractor={(item) => item._id}
               showsVerticalScrollIndicator={false}
+              estimatedItemSize={70}
             />
           )}
         </View>
