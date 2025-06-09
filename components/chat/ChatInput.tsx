@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Keyboard, Text, TextInput, TouchableOpacity, View } from "react-native";
 import type { ModelType } from "../../hooks/useChat";
 
 export const modelOptions = [
@@ -32,18 +32,26 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   selectedModel,
   isCreatingChat,
   useAgent = false,
-}) => {
+}) => {  const handleSendMessage = () => {
+    if (inputText.trim() && !isCreatingChat) {
+      Keyboard.dismiss();
+      onSendMessage();
+    }
+  };
+
   return (
     <View className="bg-app-dark-background px-3 py-0">
       {/* Input Field - Separate section */}
       <View className="border-4 border-app-dark-border border-b-0 rounded-lg rounded-b-none   ">
-        <View className="bg-app-dark-chat-bg  px-6 py-2  ">
-          <TextInput
+        <View className="bg-app-dark-chat-bg  px-6 py-2  ">          <TextInput
             className="text-app-dark-text text-base min-h-6"
             placeholder="Type your message here..."
             placeholderTextColor="#9ca3af"
             value={inputText}
             onChangeText={onInputChange}
+            onSubmitEditing={handleSendMessage}
+            blurOnSubmit={false}
+            returnKeyType="send"
             multiline
             testID="message-input"
           />
@@ -100,15 +108,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               />
             </TouchableOpacity> */}
           </View>
-          
-          {/* Send Button */}
+            {/* Send Button */}
           <TouchableOpacity
             className={`px-4 py-3 rounded-xl ${
               inputText.trim() && !isCreatingChat
                 ? "bg-app-dark-tint"
                 : "bg-app-dark-border"
             }`}
-            onPress={onSendMessage}
+            onPress={handleSendMessage}
             disabled={!inputText.trim() || isCreatingChat}
             testID="send-button"
           >

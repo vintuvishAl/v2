@@ -112,11 +112,22 @@ export const triggerStreaming = internalAction({
         console.error("HTTP request failed:", response.status, response.statusText);
         console.error("Error response:", errorText);
       } else {
-        console.log("HTTP request successful");
-        
-        // Schedule a follow-up action to save the AI response after streaming completes
+        console.log("HTTP request successful");        // Schedule a follow-up action to save the AI response after streaming completes
         if (args.chatId) {
-          await ctx.scheduler.runAfter(5000, internal.chat.saveStreamedResponse, {
+          // Schedule debug calls to monitor stream progress
+          await ctx.scheduler.runAfter(3000, internal.chat.debugStream, {
+            streamId: args.streamId,
+          });
+          
+          // Schedule with a longer delay to ensure streaming is complete
+          await ctx.scheduler.runAfter(8000, internal.chat.saveStreamedResponse, {
+            chatId: args.chatId,
+            streamId: args.streamId,
+            model: args.model,
+          });
+          
+          // Schedule a backup attempt in case the first one fails
+          await ctx.scheduler.runAfter(15000, internal.chat.saveStreamedResponseBackup, {
             chatId: args.chatId,
             streamId: args.streamId,
             model: args.model,
@@ -142,31 +153,120 @@ export const saveStreamedResponse = internalAction({
     console.log("Stream ID:", args.streamId);
     
     try {
+      // Wait a bit to ensure streaming is complete
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       const streamBody = await persistentTextStreaming.getStreamBody(ctx, args.streamId as any);
+      console.log("Stream body type:", typeof streamBody);
+      console.log("Stream body:", streamBody);
+      
       if (streamBody) {
         let responseText = "";
+        
+        // Handle different possible formats of streamBody
         if (typeof streamBody === "string") {
           responseText = streamBody;
         } else if (streamBody && typeof streamBody === "object") {
           const streamBodyAny = streamBody as any;
-          responseText = streamBodyAny.text || streamBodyAny.body || "";
+          // Try different possible property names
+          responseText = streamBodyAny.text || 
+                        streamBodyAny.body || 
+                        streamBodyAny.content || 
+                        streamBodyAny.data ||
+                        JSON.stringify(streamBodyAny);
         }
+        
+        console.log("Extracted response text length:", responseText.length);
+        console.log("Response text preview:", responseText.substring(0, 200) + "...");
         
         if (responseText.trim()) {
           await ctx.runMutation(internal.chat.saveAIResponse, {
             chatId: args.chatId,
-            content: responseText,
+            content: responseText.trim(),
             model: args.model,
           });
           console.log("Successfully saved AI response to database");
         } else {
-          console.log("No response text found to save");
+          console.log("No response text found to save - empty content");
         }
       } else {
-        console.log("No stream body found");
+        console.log("No stream body found - streamBody is null/undefined");
       }
     } catch (error) {
       console.error("Error saving streamed response:", error);
+      if (error instanceof Error) {
+        console.error("Error details:", {
+          name: error.name,
+          message: error.message,
+          stack: error.stack
+        });
+      }
+    }
+  },
+});
+
+// Backup action to save the streamed response (retry mechanism)
+export const saveStreamedResponseBackup = internalAction({
+  args: {
+    chatId: v.id("chats"),
+    streamId: v.string(),
+    model: v.string(),
+  },
+  handler: async (ctx, args) => {
+    console.log("=== SAVE STREAMED RESPONSE BACKUP ===");
+    console.log("Chat ID:", args.chatId);
+    console.log("Stream ID:", args.streamId);
+    
+    try {
+      // Check if we already have an AI response saved for this chat
+      const chat = await ctx.runQuery(internal.chat.getChatMessagesForStreaming, {
+        chatId: args.chatId
+      });
+      
+      // If we already have an assistant message, skip this backup
+      const hasAssistantMessage = chat.some((msg: any) => msg.role === "assistant");
+      if (hasAssistantMessage) {
+        console.log("Assistant message already exists, skipping backup save");
+        return;
+      }
+      
+      // Wait a bit more to ensure streaming is complete
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      const streamBody = await persistentTextStreaming.getStreamBody(ctx, args.streamId as any);
+      console.log("Backup - Stream body type:", typeof streamBody);
+      
+      if (streamBody) {
+        let responseText = "";
+        
+        if (typeof streamBody === "string") {
+          responseText = streamBody;
+        } else if (streamBody && typeof streamBody === "object") {
+          const streamBodyAny = streamBody as any;
+          responseText = streamBodyAny.text || 
+                        streamBodyAny.body || 
+                        streamBodyAny.content || 
+                        streamBodyAny.data ||
+                        JSON.stringify(streamBodyAny);
+        }
+        
+        console.log("Backup - Extracted response text length:", responseText.length);
+        
+        if (responseText.trim()) {
+          await ctx.runMutation(internal.chat.saveAIResponse, {
+            chatId: args.chatId,
+            content: responseText.trim(),
+            model: args.model,
+          });
+          console.log("Backup - Successfully saved AI response to database");
+        } else {
+          console.log("Backup - No response text found to save");
+        }
+      } else {
+        console.log("Backup - No stream body found");
+      }
+    } catch (error) {
+      console.error("Backup - Error saving streamed response:", error);
     }
   },
 });
@@ -579,7 +679,34 @@ export const saveAIResponse = internalMutation({
       return;
     }
 
-    // Save AI response to database
+    // Check if we already have an AI response for this thread recently (within last 30 seconds)
+    const recentMessages = await ctx.db
+      .query("messages")
+      .withIndex("by_thread", (q) => q.eq("threadId", chat.threadId as Id<"threads">))
+      .order("desc")
+      .take(5);
+    
+    const now = Date.now();
+    const recentAIMessage = recentMessages.find(
+      msg => msg.role === "assistant" && (now - msg.createdAt) < 30000
+    );
+    
+    if (recentAIMessage) {
+      // Check if the existing message is shorter (incomplete) compared to the new one
+      if (recentAIMessage.content.length < args.content.length) {
+        console.log("Replacing shorter AI message with longer one");        await ctx.db.patch(recentAIMessage._id, {
+          content: args.content,
+          metadata: { model: args.model },
+        });
+        console.log("Updated existing AI message with more complete content");
+        return recentAIMessage._id;
+      } else {
+        console.log("AI message already exists and is complete, skipping duplicate");
+        return recentAIMessage._id;
+      }
+    }
+
+    // Save new AI response to database
     const messageId = await ctx.db.insert("messages", {
       threadId: chat.threadId as Id<"threads">,
       userId: chat.userId,
@@ -589,7 +716,7 @@ export const saveAIResponse = internalMutation({
       createdAt: Date.now(),
     });
 
-    console.log("Saved AI response with message ID:", messageId);
+    console.log("Saved new AI response with message ID:", messageId);
     return messageId;
   },
 });
@@ -615,5 +742,47 @@ export const getChatMessagesForStreaming = internalQuery({
       content: msg.content,
       createdAt: msg.createdAt,
     }));
+  },
+});
+
+// Debug function to check stream status
+export const debugStream = internalAction({
+  args: {
+    streamId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    console.log("=== DEBUG STREAM ===");
+    console.log("Stream ID:", args.streamId);
+    
+    try {
+      const streamBody = await persistentTextStreaming.getStreamBody(ctx, args.streamId as any);
+      console.log("Stream body type:", typeof streamBody);
+      
+      let bodyLength = 0;
+      let bodySample = "null";
+        if (streamBody) {
+        if (typeof streamBody === "string") {
+          bodyLength = (streamBody as string).length;
+          bodySample = (streamBody as string).substring(0, 200);
+        } else {
+          const jsonStr = JSON.stringify(streamBody);
+          bodyLength = jsonStr.length;
+          bodySample = jsonStr.substring(0, 200);
+        }
+      }
+      
+      console.log("Stream body length:", bodyLength);
+      console.log("Stream body sample:", bodySample);
+      
+      return {
+        streamId: args.streamId,
+        bodyType: typeof streamBody,
+        bodyLength,
+        bodySample
+      };
+    } catch (error) {
+      console.error("Debug stream error:", error);
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
   },
 });

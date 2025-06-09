@@ -58,24 +58,47 @@ export const useChat = (userName: string = "vishal", onScrollToBottom?: () => vo
       }
 
       if (bodyText && bodyText.trim()) {
-        setMessages((prev) => {
+        console.log("=== STREAMING UPDATE ===");
+        console.log("Stream text length:", bodyText.length);
+          setMessages((prev) => {
+          console.log("Current messages count:", prev.length);
+          
           // Check if this content already exists in a non-streaming message (from DB)
           const existingDBMessage = prev.find(m => 
-            !m.isUser && !m.isStreaming && m.text.trim() === bodyText.trim()
+            !m.isUser && !m.isStreaming && (
+              m.text.trim() === bodyText.trim() || 
+              bodyText.trim().startsWith(m.text.trim()) ||
+              m.text.trim().startsWith(bodyText.trim())
+            )
           );
           
-          if (existingDBMessage) {
-            // Content already exists in DB, don't add streaming message
+          if (existingDBMessage && existingDBMessage.text.length >= bodyText.length) {
+            console.log("DB message is complete enough, skipping streaming message");
             return prev;
+          } else if (existingDBMessage && bodyText.length > existingDBMessage.text.length) {
+            console.log("Streaming message is more complete than DB, replacing DB message");
+            // Replace the truncated DB message with the streaming version
+            return prev.map(m => 
+              m === existingDBMessage 
+                ? {
+                    id: `stream-${currentChatId}`,
+                    text: bodyText,
+                    isUser: false,
+                    timestamp: new Date(),
+                    isStreaming: true,
+                  }
+                : m
+            );
           }
           
           const existingAIMessage = prev.find(
             (m) => m.id === `stream-${currentChatId}`
           );
+          
           if (existingAIMessage) {
             // Only update if the text has actually changed
             if (bodyText !== existingAIMessage.text) {
-              // Trigger scroll to bottom when streaming content updates
+              console.log("Updating existing streaming message");
               setTimeout(() => onScrollToBottom?.(), 100);
               return prev.map((m) =>
                 m.id === `stream-${currentChatId}`
@@ -83,9 +106,10 @@ export const useChat = (userName: string = "vishal", onScrollToBottom?: () => vo
                   : m
               );
             }
-            return prev; // No change needed
+            console.log("No change needed for streaming message");
+            return prev;
           } else {
-            // Add new AI message and scroll to bottom
+            console.log("Adding new streaming message");
             setTimeout(() => onScrollToBottom?.(), 100);
             return [
               ...prev,
@@ -101,7 +125,7 @@ export const useChat = (userName: string = "vishal", onScrollToBottom?: () => vo
         });
       }
     }
-  }, [streamBody, currentChatId, onScrollToBottom]);// Load existing chat messages when a chat is selected
+  }, [streamBody, currentChatId, onScrollToBottom]);  // Load existing chat messages when a chat is selected
   useEffect(() => {
     if (chatMessages && chatMessages.messages) {
       // Convert timestamp numbers to Date objects for frontend use
@@ -110,25 +134,41 @@ export const useChat = (userName: string = "vishal", onScrollToBottom?: () => vo
         timestamp: new Date(msg.timestamp),
       }));
       
-      // When loading from database, we should replace all messages
-      // but preserve any currently streaming message that isn't in the DB yet
+      console.log("=== LOADING MESSAGES FROM DB ===");
+      console.log("DB Messages:", messagesWithDates.length);
+      
+      // When loading from database, we need to handle streaming messages carefully
       setMessages((prev) => {
-        const streamingMessage = prev.find(m => m.id === `stream-${currentChatId}` && m.isStreaming);
-        if (streamingMessage) {
-          // Check if the streaming message content is already in the database
-          const isStreamingContentInDB = messagesWithDates.some(dbMsg => 
-            !dbMsg.isUser && dbMsg.text.trim() === streamingMessage.text.trim()
-          );
+        // Find any current streaming message
+        const currentStreamingMessage = prev.find(m => 
+          m.id === `stream-${currentChatId}` && m.isStreaming
+        );
+        
+        if (currentStreamingMessage) {
+          console.log("Found active streaming message, comparing with DB...");
           
-          if (isStreamingContentInDB) {
-            // Streaming content is already saved in DB, just use DB messages
+          // Check if there's a corresponding message in DB that might be truncated
+          const dbAIMessages = messagesWithDates.filter(m => !m.isUser);
+          const lastDbAIMessage = dbAIMessages[dbAIMessages.length - 1];
+          
+          if (lastDbAIMessage && currentStreamingMessage.text.startsWith(lastDbAIMessage.text)) {
+            console.log("Streaming message is more complete than DB, keeping streaming version");
+            // The streaming message is more complete, keep it and replace the truncated DB version
+            const filteredDbMessages = messagesWithDates.filter(m => m !== lastDbAIMessage);
+            return [...filteredDbMessages, currentStreamingMessage];
+          } else if (lastDbAIMessage && lastDbAIMessage.text.includes(currentStreamingMessage.text)) {
+            console.log("DB message is more complete than streaming, using DB version");
+            // DB message is more complete, use DB messages
             return messagesWithDates;
           } else {
-            // Keep the streaming message as it's newer than what's in DB
-            return [...messagesWithDates, streamingMessage];
+            console.log("Streaming and DB messages seem different, keeping both");
+            // They seem to be different messages, keep both but remove duplicates
+            return [...messagesWithDates, currentStreamingMessage];
           }
+        } else {
+          console.log("No active streaming message, using DB messages only");
+          return messagesWithDates;
         }
-        return messagesWithDates;
       });
     }
   }, [chatMessages, currentChatId]);
@@ -150,16 +190,35 @@ export const useChat = (userName: string = "vishal", onScrollToBottom?: () => vo
 
       return () => clearTimeout(timer);
     }
-  }, [streamBody, currentChatId]);const handleSendMessage = async () => {
+  }, [streamBody, currentChatId]);  const handleSendMessage = async () => {
     if (inputText.trim()) {
+      console.log("=== SENDING MESSAGE ===");
+      console.log("Input text:", inputText.trim());
+      
       const userMessage: Message = {
-        id: Date.now().toString(),
+        id: `user-${Date.now()}-${Math.random()}`, // More unique ID
         text: inputText.trim(),
         isUser: true,
         timestamp: new Date(),
       };
 
-      setMessages((prev) => [...prev, userMessage]);
+      setMessages((prev) => {
+        console.log("Adding user message, current count:", prev.length);
+        // Check if this exact message was already added recently (within 1 second)
+        const recentMessage = prev.find(m => 
+          m.isUser && 
+          m.text === userMessage.text && 
+          Math.abs(new Date().getTime() - m.timestamp.getTime()) < 1000
+        );
+        
+        if (recentMessage) {
+          console.log("Duplicate user message detected, skipping");
+          return prev;
+        }
+        
+        return [...prev, userMessage];
+      });
+      
       const prompt = inputText.trim();
       setInputText("");
 
