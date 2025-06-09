@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { TouchableOpacity, View } from "react-native";
+import { Text, TouchableOpacity, View } from "react-native";
 
 interface ChatHeaderProps {
   onMenuPress: () => void;
@@ -17,9 +17,8 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
   useAgent,
   onToggleAgent,
 }) => {  return (
-    <View className="flex-row justify-between items-center px-6 py-4 bg-app-dark-background">
-      <View className="flex-row space-x-6">
-        <TouchableOpacity testID="all-chats-button" className="p-2" onPress={onMenuPress}>
+    <View className="flex-row justify-between items-center px-6 py-4 bg-app-dark-background">      <View className="flex-row items-center">
+        <TouchableOpacity testID="all-chats-button" className="p-2 mr-6" onPress={onMenuPress}>
           <Ionicons
             name="menu"
             size={24}
@@ -48,11 +47,18 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
           />
         </TouchableOpacity>
       </View>
+
+      <View className="flex-1">
+        <Text className="text-app-dark-text text-lg font-semibold">
+          V2Chat
+        </Text>
+      </View>
       
-      {/* Agent Toggle */}
+      {/* Search Button */}
+        {/* Agent Toggle */}
       <TouchableOpacity
         testID="agent-toggle"
-        className={`px-3 py-2 rounded-lg flex-row items-center space-x-2 ${
+        className={`px-3 py-2 rounded-lg flex-row items-center ${
           useAgent ? 'bg-blue-600' : 'bg-gray-600'
         }`}
         onPress={() => onToggleAgent(!useAgent)}
@@ -62,7 +68,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
           size={16}
           color="white"
         />
-        <View className="w-1" />
+        <View className="w-2" />
         <Ionicons
           name="swap-horizontal"
           size={12}

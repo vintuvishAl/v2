@@ -111,14 +111,14 @@ export const MessageList: React.FC<MessageListProps> = ({ messages }) => {  // D
   };
   return (
     <View className="py-4">
-      {deduplicatedMessages.map((message) => (
-        <View
+      {deduplicatedMessages.map((message) => (        <View
           key={message.id}
           className={`mb-4 ${
             message.isUser ? "items-end" : "items-start"
           }`}
           testID={`message-${message.id}`}
-        >          <View
+        >
+          <View
             className={`px-4 py-2 rounded-lg ${
               message.isUser
                 ? "bg-app-dark-user-message ml-auto max-w-xs lg:max-w-md"

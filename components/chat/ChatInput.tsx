@@ -1,6 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
-import { Keyboard, Text, TextInput, TouchableOpacity, View } from "react-native";
+import {
+  Keyboard,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import type { ModelType } from "../../hooks/useChat";
 
 export const modelOptions = [
@@ -32,7 +38,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   selectedModel,
   isCreatingChat,
   useAgent = false,
-}) => {  const handleSendMessage = () => {
+}) => {
+  const handleSendMessage = () => {
     if (inputText.trim() && !isCreatingChat) {
       Keyboard.dismiss();
       onSendMessage();
@@ -43,7 +50,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     <View className="bg-app-dark-background px-3 py-0">
       {/* Input Field - Separate section */}
       <View className="border-4 border-app-dark-border border-b-0 rounded-lg rounded-b-none   ">
-        <View className="bg-app-dark-chat-bg  px-6 py-2  ">          <TextInput
+        <View className="bg-app-dark-chat-bg  px-6 py-2  ">
+          {" "}
+          <TextInput
             className="text-app-dark-text text-base min-h-6"
             placeholder="Type your message here..."
             placeholderTextColor="#9ca3af"
@@ -51,26 +60,21 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             onChangeText={onInputChange}
             onSubmitEditing={handleSendMessage}
             blurOnSubmit={false}
-            returnKeyType="send"
-            multiline
+            returnKeyType="send"            multiline
             testID="message-input"
           />
         </View>
-        
-        {/* Model Info Bar - Separate section */}        <View className="flex-row items-center justify-between bg-app-dark-chat-bg  px-6 py-2 ">
+        {/* Model Info Bar - Separate section */}
+        <View className="flex-row items-center justify-between bg-app-dark-chat-bg  px-6 py-2 ">
           <View className="flex-row items-center space-x-4 gap-2">
             {/* Agent Mode Indicator */}
             {useAgent && (
               <View className="flex-row items-center space-x-1 bg-blue-600 px-2 py-1 rounded">
-                <Ionicons
-                  name="calculator"
-                  size={14}
-                  color="white"
-                />
+                <Ionicons name="calculator" size={14} color="white" />
                 <Text className="text-white text-xs font-medium">Agent</Text>
               </View>
             )}
-            
+
             {/* Model Selection Button */}
             <TouchableOpacity
               className="flex-row items-center space-x-1 bg-app-dark-border px-3 py-2 rounded-lg"
@@ -78,7 +82,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               onPress={onModelSelectorPress}
             >
               <Text className="text-app-dark-text text-sm font-medium">
-                {modelOptions.find(m => m.id === selectedModel)?.name}
+                {modelOptions.find((m) => m.id === selectedModel)?.name}
               </Text>
               <Ionicons
                 name="chevron-down"
@@ -87,8 +91,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 color={"#6b6b6b"}
               />
             </TouchableOpacity>
-            
-          
+
             {/* <TouchableOpacity testID="globe-button" onPress={onGlobePress}>
               <Ionicons
                 name="globe-outline"
@@ -108,7 +111,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               />
             </TouchableOpacity> */}
           </View>
-            {/* Send Button */}
+          {/* Send Button */}
           <TouchableOpacity
             className={`px-4 py-3 rounded-xl ${
               inputText.trim() && !isCreatingChat
