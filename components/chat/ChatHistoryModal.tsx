@@ -1,8 +1,15 @@
 import { Ionicons } from "@expo/vector-icons";
-import React from "react";
-import { Modal, Text, TouchableOpacity, View } from "react-native";
 import { FlashList } from "@shopify/flash-list";
+import React, { useCallback } from "react";
+import { Modal, Text, TouchableOpacity, View } from "react-native";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming
+} from 'react-native-reanimated';
 import type { Id } from "../../convex/_generated/dataModel";
+import { useHapticFeedback } from "../../hooks/useHapticFeedback";
 
 interface ChatHistoryItem {
   _id: Id<"chats">;
@@ -30,7 +37,10 @@ export const ChatHistoryModal: React.FC<ChatHistoryModalProps> = ({
   onNewChat,
   loading = false,
 }) => {
-  const formatDate = (timestamp: number) => {
+  const { onButtonPress, onImportantAction, onCriticalAction } = useHapticFeedback();
+  
+  // Optimized date formatting with memoization
+  const formatDate = useCallback((timestamp: number) => {
     const date = new Date(timestamp);
     const now = new Date();
     const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
@@ -42,19 +52,56 @@ export const ChatHistoryModal: React.FC<ChatHistoryModalProps> = ({
     } else {
       return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
     }
-  };
+  }, []);
 
-  const handleChatPress = (chatId: Id<"chats">) => {
+  // Animated values for smooth modal transitions
+  const translateY = useSharedValue(1000);
+  const opacity = useSharedValue(0);
+
+  // Update animation when modal visibility changes
+  React.useEffect(() => {
+    if (visible) {
+      translateY.value = withSpring(0, { damping: 20, stiffness: 300 });
+      opacity.value = withTiming(1, { duration: 200 });
+    } else {
+      translateY.value = withTiming(1000, { duration: 200 });
+      opacity.value = withTiming(0, { duration: 200 });
+    }
+  }, [visible, translateY, opacity]);
+
+  // Animated styles
+  const backgroundStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+  }));
+
+  const modalStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  const handleChatPress = useCallback((chatId: Id<"chats">) => {
+    onButtonPress();
     onChatSelect(chatId);
     onClose();
-  };
+  }, [onButtonPress, onChatSelect, onClose]);
 
-  const handleNewChat = () => {
+  const handleNewChat = useCallback(() => {
+    onImportantAction();
     onNewChat();
     onClose();
-  };
+  }, [onImportantAction, onNewChat, onClose]);
 
-  const renderChatItem = ({ item }: { item: ChatHistoryItem }) => (
+  const handleDeleteChat = useCallback((chatId: Id<"chats">) => {
+    onCriticalAction();
+    onDeleteChat(chatId);
+  }, [onCriticalAction, onDeleteChat]);
+
+  const handleClose = useCallback(() => {
+    onButtonPress();
+    onClose();
+  }, [onButtonPress, onClose]);
+
+  // Memoized render function for chat items to prevent unnecessary re-renders
+  const renderChatItem = useCallback(({ item }: { item: ChatHistoryItem }) => (
     <View className="flex-row items-center px-4 py-3 border-b border-gray-700">
       <TouchableOpacity
         className="flex-1 mr-3"
@@ -67,60 +114,66 @@ export const ChatHistoryModal: React.FC<ChatHistoryModalProps> = ({
           {formatDate(item.updatedAt || item.createdAt)}
         </Text>
       </TouchableOpacity>
-      
       <TouchableOpacity
         className="p-2"
-        onPress={() => onDeleteChat(item._id)}
+        onPress={() => handleDeleteChat(item._id)}
       >
         <Ionicons name="trash-outline" size={18} color="#ef4444" />
       </TouchableOpacity>
     </View>
-  );
+  ), [handleChatPress, handleDeleteChat, formatDate]);
+
+  // Memoized key extractor
+  const keyExtractor = useCallback((item: ChatHistoryItem) => item._id, []);
 
   return (
     <Modal
       visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
+      transparent={true}
+      animationType="none"
       onRequestClose={onClose}
     >
-      <View className="flex-1 bg-gray-900">
-        <View className="flex-row justify-between items-center px-4 py-4 border-b border-gray-700">
-          <Text className="text-white text-xl font-semibold">Chat History</Text>
-          <TouchableOpacity onPress={onClose}>
-            <Ionicons name="close" size={24} color="white" />
+      <Animated.View style={[{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }, backgroundStyle]}>
+        <Animated.View style={[{ flex: 1, backgroundColor: '#111827' }, modalStyle]}>
+          <View className="flex-row justify-between items-center px-4 py-4 border-b border-gray-700">
+            <Text className="text-white text-xl font-semibold">Chat History</Text>
+            <TouchableOpacity onPress={handleClose}>
+              <Ionicons name="close" size={24} color="white" />
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity
+            className="flex-row items-center px-4 py-4 bg-blue-600 mx-4 mt-4 rounded-lg"
+            onPress={handleNewChat}
+          >
+            <Ionicons name="add" size={20} color="white" />
+            <Text className="text-white text-base font-medium ml-2">Start New Chat</Text>
           </TouchableOpacity>
-        </View>
-        <TouchableOpacity
-          className="flex-row items-center px-4 py-4 bg-blue-600 mx-4 mt-4 rounded-lg"
-          onPress={handleNewChat}
-        >
-          <Ionicons name="add" size={20} color="white" />
-          <Text className="text-white text-base font-medium ml-2">Start New Chat</Text>
-        </TouchableOpacity>
-        <View className="flex-1 mt-4">
-          {loading ? (
-            <View className="flex-1 justify-center items-center">
-              <Text className="text-gray-400">Loading chat history...</Text>
-            </View>
-          ) : chatHistory.length === 0 ? (
-            <View className="flex-1 justify-center items-center px-4">
-              <Ionicons name="chatbubbles-outline" size={64} color="#6b7280" />
-              <Text className="text-gray-400 text-lg mt-4 mb-2">No chat history</Text>
-              <Text className="text-gray-500 text-center">
-                Start a conversation to see your chat history here
-              </Text>
-            </View>          ) : (
-            <FlashList
-              data={chatHistory}
-              renderItem={renderChatItem}
-              keyExtractor={(item) => item._id}
-              showsVerticalScrollIndicator={false}
-              estimatedItemSize={70}
-            />
-          )}
-        </View>
-      </View>
+          <View className="flex-1 mt-4">
+            {loading ? (
+              <View className="flex-1 justify-center items-center">
+                <Text className="text-gray-400">Loading chat history...</Text>
+              </View>
+            ) : chatHistory.length === 0 ? (
+              <View className="flex-1 justify-center items-center px-4">
+                <Ionicons name="chatbubbles-outline" size={64} color="#6b7280" />
+                <Text className="text-gray-400 text-lg mt-4 mb-2">No chat history</Text>
+                <Text className="text-gray-500 text-center">
+                  Start a conversation to see your chat history here
+                </Text>
+              </View>
+            ) : (              <FlashList
+                data={chatHistory}
+                renderItem={renderChatItem}
+                keyExtractor={keyExtractor}
+                showsVerticalScrollIndicator={false}
+                estimatedItemSize={70}
+                removeClippedSubviews={true}
+                getItemType={() => 'chat-item'}
+              />
+            )}
+          </View>
+        </Animated.View>
+      </Animated.View>
     </Modal>
   );
 };

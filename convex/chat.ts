@@ -4,7 +4,6 @@ import { components, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { action, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { utilityAgent } from "./agents";
-import { auth } from "./auth";
 
 const persistentTextStreaming = new PersistentTextStreaming(components.persistentTextStreaming);
 
@@ -14,12 +13,7 @@ export const createChat = mutation({
     model: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    console.log("=== CREATE CHAT START ===");
-    console.log("Prompt:", args.prompt.substring(0, 100) + "...");
-    console.log("Model:", args.model);
-    
     const streamId = await persistentTextStreaming.createStream(ctx);
-    console.log("Created stream ID:", streamId);
 
     const chatId = await ctx.db.insert("chats", {
       title: args.prompt.slice(0, 50) + (args.prompt.length > 50 ? "..." : ""),
@@ -27,11 +21,9 @@ export const createChat = mutation({
       streamId,
       createdAt: Date.now(),
     });
-      console.log("Created chat ID:", chatId);
 
     // Trigger streaming via internal action
     const selectedModel = args.model || "gemini-2.5-flash";
-    console.log("Triggering streaming with model:", selectedModel);
     
     await ctx.scheduler.runAfter(0, internal.chat.triggerStreaming, {
       streamId,
@@ -50,26 +42,20 @@ export const triggerStreaming = internalAction({
     prompt: v.string(),
     model: v.string(),
     chatId: v.optional(v.id("chats")),
-  },
-  handler: async (ctx, args) => {
-    console.log("=== TRIGGER STREAMING START ===");
-    console.log("StreamId:", args.streamId);
-    console.log("Model:", args.model);
-    console.log("Prompt:", args.prompt.substring(0, 100) + "...");
-    console.log("Chat ID:", args.chatId);
-      // Get conversation history if we have a chat ID
+  },  handler: async (ctx, args) => {
+    // Get conversation history if we have a chat ID
     let conversationHistory: {role: string, content: string}[] = [];
     if (args.chatId) {
       try {
         const chatMessages = await ctx.runQuery(internal.chat.getChatMessagesForStreaming, {
           chatId: args.chatId
         });
-          if (chatMessages && chatMessages.length > 0) {
+        
+        if (chatMessages && chatMessages.length > 0) {
           conversationHistory = chatMessages.map((msg: {role: string, content: string}) => ({
             role: msg.role,
             content: msg.content
           }));
-          console.log("Retrieved conversation history:", conversationHistory.length, "messages");
         }
       } catch (error) {
         console.error("Error retrieving conversation history:", error);
@@ -82,18 +68,13 @@ export const triggerStreaming = internalAction({
       return;
     }
     
-    console.log("Convex URL:", convexUrl);
-    const requestUrl = `${convexUrl}/chat-stream`;
-    console.log("Making request to:", requestUrl);
-    
-    const requestBody = {
+    const requestUrl = `${convexUrl}/chat-stream`;    const requestBody = {
       streamId: args.streamId,
       prompt: args.prompt,
       model: args.model,
       conversationHistory, // Include conversation history
+      chatId: args.chatId, // Include chatId so HTTP endpoint can save response directly
     };
-    
-    console.log("Request body:", JSON.stringify(requestBody, null, 2));
     
     try {
       const response = await fetch(requestUrl, {
@@ -102,171 +83,14 @@ export const triggerStreaming = internalAction({
           "Content-Type": "application/json",
         },
         body: JSON.stringify(requestBody),
-      });
-      
-      console.log("HTTP response status:", response.status);
-      console.log("HTTP response headers:", Object.fromEntries(response.headers.entries()));
-      
-      if (!response.ok) {
+      });      if (!response.ok) {
         const errorText = await response.text();
-        console.error("HTTP request failed:", response.status, response.statusText);
-        console.error("Error response:", errorText);
+        console.error("HTTP request failed:", response.status, response.statusText, errorText);
       } else {
-        console.log("HTTP request successful");        // Schedule a follow-up action to save the AI response after streaming completes
-        if (args.chatId) {
-          // Schedule debug calls to monitor stream progress
-          await ctx.scheduler.runAfter(3000, internal.chat.debugStream, {
-            streamId: args.streamId,
-          });
-          
-          // Schedule with a longer delay to ensure streaming is complete
-          await ctx.scheduler.runAfter(8000, internal.chat.saveStreamedResponse, {
-            chatId: args.chatId,
-            streamId: args.streamId,
-            model: args.model,
-          });
-          
-          // Schedule a backup attempt in case the first one fails
-          await ctx.scheduler.runAfter(15000, internal.chat.saveStreamedResponseBackup, {
-            chatId: args.chatId,
-            streamId: args.streamId,
-            model: args.model,
-          });
-        }
+        console.log("Streaming triggered successfully");
       }
     } catch (error) {
       console.error("Failed to trigger streaming:", error);
-    }
-  },
-});
-
-// Internal action to save the streamed response after completion
-export const saveStreamedResponse = internalAction({
-  args: {
-    chatId: v.id("chats"),
-    streamId: v.string(),
-    model: v.string(),
-  },
-  handler: async (ctx, args) => {
-    console.log("=== SAVE STREAMED RESPONSE ===");
-    console.log("Chat ID:", args.chatId);
-    console.log("Stream ID:", args.streamId);
-    
-    try {
-      // Wait a bit to ensure streaming is complete
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      const streamBody = await persistentTextStreaming.getStreamBody(ctx, args.streamId as any);
-      console.log("Stream body type:", typeof streamBody);
-      console.log("Stream body:", streamBody);
-      
-      if (streamBody) {
-        let responseText = "";
-        
-        // Handle different possible formats of streamBody
-        if (typeof streamBody === "string") {
-          responseText = streamBody;
-        } else if (streamBody && typeof streamBody === "object") {
-          const streamBodyAny = streamBody as any;
-          // Try different possible property names
-          responseText = streamBodyAny.text || 
-                        streamBodyAny.body || 
-                        streamBodyAny.content || 
-                        streamBodyAny.data ||
-                        JSON.stringify(streamBodyAny);
-        }
-        
-        console.log("Extracted response text length:", responseText.length);
-        console.log("Response text preview:", responseText.substring(0, 200) + "...");
-        
-        if (responseText.trim()) {
-          await ctx.runMutation(internal.chat.saveAIResponse, {
-            chatId: args.chatId,
-            content: responseText.trim(),
-            model: args.model,
-          });
-          console.log("Successfully saved AI response to database");
-        } else {
-          console.log("No response text found to save - empty content");
-        }
-      } else {
-        console.log("No stream body found - streamBody is null/undefined");
-      }
-    } catch (error) {
-      console.error("Error saving streamed response:", error);
-      if (error instanceof Error) {
-        console.error("Error details:", {
-          name: error.name,
-          message: error.message,
-          stack: error.stack
-        });
-      }
-    }
-  },
-});
-
-// Backup action to save the streamed response (retry mechanism)
-export const saveStreamedResponseBackup = internalAction({
-  args: {
-    chatId: v.id("chats"),
-    streamId: v.string(),
-    model: v.string(),
-  },
-  handler: async (ctx, args) => {
-    console.log("=== SAVE STREAMED RESPONSE BACKUP ===");
-    console.log("Chat ID:", args.chatId);
-    console.log("Stream ID:", args.streamId);
-    
-    try {
-      // Check if we already have an AI response saved for this chat
-      const chat = await ctx.runQuery(internal.chat.getChatMessagesForStreaming, {
-        chatId: args.chatId
-      });
-      
-      // If we already have an assistant message, skip this backup
-      const hasAssistantMessage = chat.some((msg: any) => msg.role === "assistant");
-      if (hasAssistantMessage) {
-        console.log("Assistant message already exists, skipping backup save");
-        return;
-      }
-      
-      // Wait a bit more to ensure streaming is complete
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      const streamBody = await persistentTextStreaming.getStreamBody(ctx, args.streamId as any);
-      console.log("Backup - Stream body type:", typeof streamBody);
-      
-      if (streamBody) {
-        let responseText = "";
-        
-        if (typeof streamBody === "string") {
-          responseText = streamBody;
-        } else if (streamBody && typeof streamBody === "object") {
-          const streamBodyAny = streamBody as any;
-          responseText = streamBodyAny.text || 
-                        streamBodyAny.body || 
-                        streamBodyAny.content || 
-                        streamBodyAny.data ||
-                        JSON.stringify(streamBodyAny);
-        }
-        
-        console.log("Backup - Extracted response text length:", responseText.length);
-        
-        if (responseText.trim()) {
-          await ctx.runMutation(internal.chat.saveAIResponse, {
-            chatId: args.chatId,
-            content: responseText.trim(),
-            model: args.model,
-          });
-          console.log("Backup - Successfully saved AI response to database");
-        } else {
-          console.log("Backup - No response text found to save");
-        }
-      } else {
-        console.log("Backup - No stream body found");
-      }
-    } catch (error) {
-      console.error("Backup - Error saving streamed response:", error);
     }
   },
 });
@@ -288,64 +112,43 @@ export const getChat = query({
 export const getUserChats = query({
   args: {},
   handler: async (ctx) => {
-    const userId = await auth.getUserId(ctx);
-    if (!userId) {
-      return [];
-    }
-    
+    // Return all chats since we don't have auth anymore
     return await ctx.db
       .query("chats")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
       .order("desc")
       .take(50);
   },
 });
 
-// Create a chat with proper user authentication
+// Create a chat without authentication requirements
 export const createUserChat = mutation({
   args: {
     prompt: v.string(),
     model: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
-    console.log("=== CREATE USER CHAT START ===");
-    console.log("Prompt:", args.prompt.substring(0, 100) + "...");
-    console.log("Model:", args.model);
-    console.log("User ID:", userId);
-    
+  },  handler: async (ctx, args) => {
     const streamId = await persistentTextStreaming.createStream(ctx);
-    console.log("Created stream ID:", streamId);
 
     // Create thread first
     const threadId = await ctx.db.insert("threads", {
-      userId: userId || undefined,
       title: args.prompt.slice(0, 50) + (args.prompt.length > 50 ? "..." : ""),
       createdAt: Date.now(),
       updatedAt: Date.now(),
-    });    const chatId = await ctx.db.insert("chats", {
+    });
+
+    const chatId = await ctx.db.insert("chats", {
       title: args.prompt.slice(0, 50) + (args.prompt.length > 50 ? "..." : ""),
       prompt: args.prompt,
       streamId,
-      userId: userId || undefined,
       threadId: threadId,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-    });
-    
-    console.log("Created chat ID:", chatId);
-    console.log("Created thread ID:", threadId);    // Save user message to database
-    await ctx.db.insert("messages", {
-      threadId: threadId as Id<"threads">,
-      userId: userId || undefined,
+    });    // Save user message to database with proper sequence
+    await ctx.runMutation(internal.chat.saveMessageWithSequenceInternal, {
+      threadId: threadId,
       content: args.prompt,
       role: "user" as const,
-      createdAt: Date.now(),
-    });
-
-    // Trigger streaming via internal action
+    });// Trigger streaming via internal action
     const selectedModel = args.model || "gemini-2.5-flash";
-    console.log("Triggering streaming with model:", selectedModel);
     
     await ctx.scheduler.runAfter(0, internal.chat.triggerStreaming, {
       streamId,
@@ -362,14 +165,10 @@ export const createUserChat = mutation({
 export const deleteChat = mutation({
   args: { chatId: v.id("chats") },
   handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
-    if (!userId) {
-      throw new Error("Not authenticated");
-    }
-    
+    // Since we don't have auth, just delete the chat
     const chat = await ctx.db.get(args.chatId);
-    if (!chat || chat.userId !== userId) {
-      throw new Error("Chat not found or not authorized");
+    if (!chat) {
+      throw new Error("Chat not found");
     }
     
     await ctx.db.delete(args.chatId);
@@ -380,17 +179,12 @@ export const deleteChat = mutation({
 export const updateChatTitle = mutation({
   args: { 
     chatId: v.id("chats"), 
-    title: v.string() 
+    title: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
-    if (!userId) {
-      throw new Error("Not authenticated");
-    }
-    
     const chat = await ctx.db.get(args.chatId);
-    if (!chat || chat.userId !== userId) {
-      throw new Error("Chat not found or not authorized");
+    if (!chat) {
+      throw new Error("Chat not found");
     }
     
     await ctx.db.patch(args.chatId, { 
@@ -404,10 +198,9 @@ export const updateChatTitle = mutation({
 export const getChatMessages = query({
   args: { chatId: v.id("chats") },
   handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
     const chat = await ctx.db.get(args.chatId);
     
-    if (!chat || (chat.userId && chat.userId !== userId)) {
+    if (!chat) {
       return null;
     }
       // For streaming chats, we'll get the stream body
@@ -443,11 +236,7 @@ export const agentChat = action({
     prompt: v.string(),
     model: v.optional(v.string()),
     threadId: v.optional(v.string()),
-    userId: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    console.log("=== AGENT CHAT START ===");
-    console.log("Prompt:", args.prompt.substring(0, 100) + "...");
+  },  handler: async (ctx, args) => {
     
     try {
       let threadId = args.threadId;
@@ -459,7 +248,7 @@ export const agentChat = action({
         thread = result.thread;
       } else {
         // Create new thread
-        const result = await utilityAgent.createThread(ctx, { userId: args.userId });
+        const result = await utilityAgent.createThread(ctx, {});
         threadId = result.threadId;
         thread = result.thread;
       }
@@ -505,25 +294,11 @@ export const getThreadMessages = action({
 
 // List all threads for a user - using component queries
 export const getUserThreads = query({
-  args: { userId: v.optional(v.string()) },
+  args: {},
   handler: async (ctx, args) => {
-    try {
-      if (!args.userId) {
-        return [];
-      }
-      
-      // Use the agent component's built-in query for threads
-      const threads = await ctx.runQuery(components.agent.threads.listThreadsByUserId, {
-        userId: args.userId,
-        order: "desc" as const,
-        paginationOpts: { cursor: null, numItems: 20 }
-      });
-      
-      return threads.page;
-    } catch (error) {
-      console.error("Error fetching user threads:", error);
-      return [];
-    }
+    // Since we don't have users anymore, return empty array
+    // You might want to implement a different logic here based on your needs
+    return [];
   },
 });
 
@@ -533,44 +308,34 @@ export const continueUserChat = mutation({
     chatId: v.id("chats"),
     prompt: v.string(),
     model: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
-    console.log("=== CONTINUE USER CHAT START ===");
-    console.log("Chat ID:", args.chatId);
-    console.log("Prompt:", args.prompt.substring(0, 100) + "...");
-    console.log("Model:", args.model);
-    console.log("User ID:", userId);
-    
-    // Verify user owns this chat
+  },  handler: async (ctx, args) => {
+    // Verify chat exists
     const existingChat = await ctx.db.get(args.chatId);
-    if (!existingChat || (existingChat.userId && existingChat.userId !== userId)) {
-      throw new Error("Chat not found or not authorized");
+    if (!existingChat) {
+      throw new Error("Chat not found");
     }
 
     // Create a new stream for the continuation
     const streamId = await persistentTextStreaming.createStream(ctx);
-    console.log("Created new stream ID:", streamId);
 
     // Update the chat with new stream and latest prompt
     await ctx.db.patch(args.chatId, {
       streamId,
       prompt: args.prompt, // Update to latest prompt
       updatedAt: Date.now(),
-    });
-    
-    console.log("Updated chat with new stream");    // Save user message to database if we have a thread
+    });    // Save user message to database with proper sequence
     if (existingChat.threadId) {
-      await ctx.db.insert("messages", {
-        threadId: existingChat.threadId as Id<"threads">,
-        userId: userId || undefined,
+      await ctx.runMutation(internal.chat.saveMessageWithSequenceInternal, {
+        threadId: existingChat.threadId,
         content: args.prompt,
         role: "user" as const,
-        createdAt: Date.now(),
       });
-    }    // Trigger streaming via internal action
+    } else {
+      console.error("No threadId found for chat:", args.chatId);
+    }
+
+    // Trigger streaming via internal action
     const selectedModel = args.model || "gemini-2.5-flash";
-    console.log("Triggering streaming with model:", selectedModel);
     
     await ctx.scheduler.runAfter(0, internal.chat.triggerStreaming, {
       streamId,
@@ -592,19 +357,16 @@ export const saveMessage = mutation({
     model: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
-    
-    // Verify user owns this chat
+    // Verify chat exists
     const chat = await ctx.db.get(args.chatId);
-    if (!chat || (chat.userId && chat.userId !== userId)) {
-      throw new Error("Chat not found or not authorized");
+    if (!chat) {
+      throw new Error("Chat not found");
     }
 
     // Create thread if it doesn't exist
     let threadId = chat.threadId;
     if (!threadId) {
       const newThreadId = await ctx.db.insert("threads", {
-        userId: userId || undefined,
         title: chat.title,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -613,14 +375,141 @@ export const saveMessage = mutation({
       // Update chat with thread reference
       await ctx.db.patch(args.chatId, { threadId: newThreadId });
       threadId = newThreadId;
-    }
-
+    }    const sequenceNumber = await getNextSequenceNumber(ctx, threadId);
+    
     const messageId = await ctx.db.insert("messages", {
       threadId,
-      userId: userId || undefined,
       content: args.content,
       role: args.role,
+      sequenceNumber,
       metadata: args.model ? { model: args.model } : undefined,
+      createdAt: Date.now(),
+    });
+
+    return messageId;
+  },
+});
+
+// Save a message with proper sequence number
+export const saveMessageWithSequence = mutation({
+  args: {
+    threadId: v.id("threads"),
+    content: v.string(),
+    role: v.union(v.literal("user"), v.literal("assistant"), v.literal("system")),
+    model: v.optional(v.string()),
+    metadata: v.optional(v.object({
+      model: v.optional(v.string()),
+      streamId: v.optional(v.string()),
+      savedAt: v.optional(v.number()),
+      lastUpdated: v.optional(v.number()),
+      usage: v.optional(v.object({
+        promptTokens: v.number(),
+        completionTokens: v.number(),
+        totalTokens: v.number(),
+      })),
+    })),
+  },
+  handler: async (ctx, args) => {
+    const sequenceNumber = await getNextSequenceNumber(ctx, args.threadId);
+    
+    const messageId = await ctx.db.insert("messages", {
+      threadId: args.threadId,
+      content: args.content,
+      role: args.role,
+      sequenceNumber,
+      metadata: args.metadata,
+      createdAt: Date.now(),
+    });
+
+    return { messageId, sequenceNumber };
+  },
+});
+
+// Internal version of saveMessageWithSequence
+export const saveMessageWithSequenceInternal = internalMutation({
+  args: {
+    threadId: v.id("threads"),
+    content: v.string(),
+    role: v.union(v.literal("user"), v.literal("assistant"), v.literal("system")),
+    model: v.optional(v.string()),
+    metadata: v.optional(v.object({
+      model: v.optional(v.string()),
+      streamId: v.optional(v.string()),
+      savedAt: v.optional(v.number()),
+      lastUpdated: v.optional(v.number()),
+      usage: v.optional(v.object({
+        promptTokens: v.number(),
+        completionTokens: v.number(),
+        totalTokens: v.number(),
+      })),
+    })),
+  },
+  handler: async (ctx, args) => {
+    const sequenceNumber = await getNextSequenceNumber(ctx, args.threadId);
+    
+    const messageId = await ctx.db.insert("messages", {
+      threadId: args.threadId,
+      content: args.content,
+      role: args.role,
+      sequenceNumber,
+      metadata: args.metadata,
+      createdAt: Date.now(),
+    });
+
+    return { messageId, sequenceNumber };
+  },
+});
+
+// Save AI response with streaming completion tracking
+export const saveAIResponseWithTracking = mutation({
+  args: {
+    chatId: v.id("chats"),
+    content: v.string(),
+    model: v.string(),
+    streamId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const chat = await ctx.db.get(args.chatId);
+    if (!chat || !chat.threadId) {
+      throw new Error("Chat not found or no thread ID");
+    }    // Check if we already have an AI response for this stream
+    const allMessages = await ctx.db
+      .query("messages")
+      .withIndex("by_thread", (q) => q.eq("threadId", chat.threadId as Id<"threads">))
+      .filter((q) => q.eq(q.field("role"), "assistant"))
+      .collect();
+    
+    const existingMessage = allMessages.find(msg => 
+      msg.metadata?.streamId === args.streamId
+    );
+
+    if (existingMessage) {
+      // Update existing message if the new content is longer (more complete)
+      if (args.content.length > existingMessage.content.length) {        await ctx.db.patch(existingMessage._id, {
+          content: args.content,
+          metadata: { 
+            model: args.model, 
+            streamId: args.streamId,
+            lastUpdated: Date.now()
+          },
+        });
+        return existingMessage._id;
+      }
+      return existingMessage._id;
+    }
+
+    // Create new AI response message with proper sequence
+    const sequenceNumber = await getNextSequenceNumber(ctx, chat.threadId as Id<"threads">);
+      const messageId = await ctx.db.insert("messages", {
+      threadId: chat.threadId as Id<"threads">,
+      content: args.content,
+      role: "assistant" as const,
+      sequenceNumber,
+      metadata: { 
+        model: args.model, 
+        streamId: args.streamId,
+        savedAt: Date.now()
+      },
       createdAt: Date.now(),
     });
 
@@ -632,16 +521,15 @@ export const saveMessage = mutation({
 export const getChatMessagesFromDB = query({
   args: { chatId: v.id("chats") },
   handler: async (ctx, args) => {
-    const userId = await auth.getUserId(ctx);
     const chat = await ctx.db.get(args.chatId);
     
-    if (!chat || (chat.userId && chat.userId !== userId)) {
+    if (!chat) {
       return null;
     }
 
     if (!chat.threadId) {
       return { chat, messages: [] };
-    }    const messages = await ctx.db
+    }const messages = await ctx.db
       .query("messages")
       .withIndex("by_thread", (q) => q.eq("threadId", chat.threadId as Id<"threads">))
       .order("asc")
@@ -660,7 +548,7 @@ export const getChatMessagesFromDB = query({
   },
 });
 
-// Internal mutation to save AI response
+// Internal mutation to save AI response (simplified)
 export const saveAIResponse = internalMutation({
   args: {
     chatId: v.id("chats"),
@@ -668,55 +556,36 @@ export const saveAIResponse = internalMutation({
     model: v.string(),
   },
   handler: async (ctx, args) => {
-    console.log("=== SAVE AI RESPONSE ===");
-    console.log("Chat ID:", args.chatId);
-    console.log("Content length:", args.content.length);
-    console.log("Model:", args.model);
+    console.log("saveAIResponse: Called with", {
+      chatId: args.chatId,
+      contentLength: args.content.length,
+      model: args.model
+    });
     
     const chat = await ctx.db.get(args.chatId);
     if (!chat || !chat.threadId) {
-      console.error("Chat not found or no thread ID");
+      console.error("saveAIResponse: Chat not found or no thread ID for chatId:", args.chatId);
       return;
     }
 
-    // Check if we already have an AI response for this thread recently (within last 30 seconds)
-    const recentMessages = await ctx.db
-      .query("messages")
-      .withIndex("by_thread", (q) => q.eq("threadId", chat.threadId as Id<"threads">))
-      .order("desc")
-      .take(5);
-    
-    const now = Date.now();
-    const recentAIMessage = recentMessages.find(
-      msg => msg.role === "assistant" && (now - msg.createdAt) < 30000
-    );
-    
-    if (recentAIMessage) {
-      // Check if the existing message is shorter (incomplete) compared to the new one
-      if (recentAIMessage.content.length < args.content.length) {
-        console.log("Replacing shorter AI message with longer one");        await ctx.db.patch(recentAIMessage._id, {
-          content: args.content,
-          metadata: { model: args.model },
-        });
-        console.log("Updated existing AI message with more complete content");
-        return recentAIMessage._id;
-      } else {
-        console.log("AI message already exists and is complete, skipping duplicate");
-        return recentAIMessage._id;
-      }
-    }
+    console.log("saveAIResponse: Found chat with threadId:", chat.threadId);
 
-    // Save new AI response to database
+    // Get the next sequence number for proper ordering
+    const sequenceNumber = await getNextSequenceNumber(ctx, chat.threadId);
+    
+    console.log("saveAIResponse: Next sequence number:", sequenceNumber);
+    
+    // Save AI response to database with sequence number
     const messageId = await ctx.db.insert("messages", {
-      threadId: chat.threadId as Id<"threads">,
-      userId: chat.userId,
+      threadId: chat.threadId,
       content: args.content,
       role: "assistant" as const,
+      sequenceNumber,
       metadata: { model: args.model },
       createdAt: Date.now(),
     });
 
-    console.log("Saved new AI response with message ID:", messageId);
+    console.log("saveAIResponse: Successfully saved AI message with ID:", messageId);
     return messageId;
   },
 });
@@ -741,48 +610,16 @@ export const getChatMessagesForStreaming = internalQuery({
       role: msg.role,
       content: msg.content,
       createdAt: msg.createdAt,
-    }));
-  },
+    }));},
 });
 
-// Debug function to check stream status
-export const debugStream = internalAction({
-  args: {
-    streamId: v.string(),
-  },
-  handler: async (ctx, args) => {
-    console.log("=== DEBUG STREAM ===");
-    console.log("Stream ID:", args.streamId);
-    
-    try {
-      const streamBody = await persistentTextStreaming.getStreamBody(ctx, args.streamId as any);
-      console.log("Stream body type:", typeof streamBody);
-      
-      let bodyLength = 0;
-      let bodySample = "null";
-        if (streamBody) {
-        if (typeof streamBody === "string") {
-          bodyLength = (streamBody as string).length;
-          bodySample = (streamBody as string).substring(0, 200);
-        } else {
-          const jsonStr = JSON.stringify(streamBody);
-          bodyLength = jsonStr.length;
-          bodySample = jsonStr.substring(0, 200);
-        }
-      }
-      
-      console.log("Stream body length:", bodyLength);
-      console.log("Stream body sample:", bodySample);
-      
-      return {
-        streamId: args.streamId,
-        bodyType: typeof streamBody,
-        bodyLength,
-        bodySample
-      };
-    } catch (error) {
-      console.error("Debug stream error:", error);
-      return { error: error instanceof Error ? error.message : String(error) };
-    }
-  },
-});
+// Helper function to get the next sequence number for a thread (with retry for race conditions)
+const getNextSequenceNumber = async (ctx: any, threadId: Id<"threads">) => {
+  const lastMessage = await ctx.db
+    .query("messages")
+    .withIndex("by_thread_sequence", (q: any) => q.eq("threadId", threadId))
+    .order("desc")
+    .first();
+  
+  return (lastMessage?.sequenceNumber || 0) + 1;
+};

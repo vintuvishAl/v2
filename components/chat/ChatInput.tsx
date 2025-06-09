@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import React from "react";
+import React, { useCallback } from "react";
 import {
   Keyboard,
   Text,
@@ -8,6 +8,7 @@ import {
   View,
 } from "react-native";
 import type { ModelType } from "../../hooks/useChat";
+import { useHapticFeedback } from "../../hooks/useHapticFeedback";
 
 export const modelOptions = [
   { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "Google" },
@@ -28,7 +29,7 @@ interface ChatInputProps {
   useAgent?: boolean;
 }
 
-export const ChatInput: React.FC<ChatInputProps> = ({
+export const ChatInput: React.FC<ChatInputProps> = React.memo(({
   inputText,
   onInputChange,
   onSendMessage,
@@ -39,12 +40,27 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   isCreatingChat,
   useAgent = false,
 }) => {
-  const handleSendMessage = () => {
+  const { onImportantAction, onButtonPress } = useHapticFeedback();
+
+  const handleSendMessage = useCallback(() => {
     if (inputText.trim() && !isCreatingChat) {
+      // Add haptic feedback for sending messages
+      onImportantAction();
       Keyboard.dismiss();
       onSendMessage();
     }
-  };
+  }, [inputText, isCreatingChat, onImportantAction, onSendMessage]);
+
+  const handleModelSelectorPress = useCallback(() => {
+    // Add haptic feedback for model selection
+    onButtonPress();
+    onModelSelectorPress();
+  }, [onButtonPress, onModelSelectorPress]);
+
+  // Memoize model name to prevent recalculation
+  const selectedModelName = React.useMemo(() => {
+    return modelOptions.find((m) => m.id === selectedModel)?.name;
+  }, [selectedModel]);
 
   return (
     <View className="bg-app-dark-background px-3 py-0">
@@ -73,16 +89,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 <Ionicons name="calculator" size={14} color="white" />
                 <Text className="text-white text-xs font-medium">Agent</Text>
               </View>
-            )}
-
-            {/* Model Selection Button */}
-            <TouchableOpacity
+            )}            {/* Model Selection Button */}            <TouchableOpacity
               className="flex-row items-center space-x-1 bg-app-dark-border px-3 py-2 rounded-lg"
               testID="model-selector"
-              onPress={onModelSelectorPress}
+              onPress={handleModelSelectorPress}
             >
               <Text className="text-app-dark-text text-sm font-medium">
-                {modelOptions.find((m) => m.id === selectedModel)?.name}
+                {selectedModelName}
               </Text>
               <Ionicons
                 name="chevron-down"
@@ -92,7 +105,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               />
             </TouchableOpacity>
 
-            {/* <TouchableOpacity testID="globe-button" onPress={onGlobePress}>
+            {/* <TouchableOpacity testID="globe-button" onPress={handleGlobePress}>
               <Ionicons
                 name="globe-outline"
                 size={20}
@@ -102,7 +115,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             </TouchableOpacity>
             
            
-            <TouchableOpacity testID="attach-button" onPress={onAttachPress}>
+            <TouchableOpacity testID="attach-button" onPress={handleAttachPress}>
               <Ionicons
                 name="attach"
                 size={20}
@@ -142,4 +155,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       </View>
     </View>
   );
-};
+});
+
+ChatInput.displayName = 'ChatInput';

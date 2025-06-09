@@ -1,11 +1,8 @@
-import { ConvexAuthProvider } from '@convex-dev/auth/react';
 import { DarkTheme, ThemeProvider } from '@react-navigation/native';
-import { ConvexReactClient } from 'convex/react';
+import { ConvexProvider, ConvexReactClient } from 'convex/react';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
 import { StatusBar } from 'expo-status-bar';
-import { Platform } from 'react-native';
 import 'react-native-reanimated';
 import '../global.css';
 
@@ -13,13 +10,6 @@ import '../global.css';
 const convex = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL!, {
   unsavedChangesWarning: false,
 });
-
-// Secure storage for authentication tokens
-const secureStorage = {
-  getItem: SecureStore.getItemAsync,
-  setItem: SecureStore.setItemAsync,
-  removeItem: SecureStore.deleteItemAsync,
-};
 
 export default function RootLayout() {
   const [loaded] = useFonts({
@@ -32,14 +22,7 @@ export default function RootLayout() {
   }
 
   return (
-    <ConvexAuthProvider
-      client={convex}
-      storage={
-        Platform.OS === "android" || Platform.OS === "ios"
-          ? secureStorage
-          : undefined
-      }
-    >
+    <ConvexProvider client={convex}>
       <ThemeProvider value={DarkTheme}>
         <Stack>
           <Stack.Screen name="index" options={{ headerShown: false }} />
@@ -47,6 +30,6 @@ export default function RootLayout() {
         </Stack>
         <StatusBar style="light" />
       </ThemeProvider>
-    </ConvexAuthProvider>
+    </ConvexProvider>
   );
 }

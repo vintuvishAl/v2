@@ -1,23 +1,18 @@
-import { render } from '@testing-library/react-native';
+import React from 'react';
 
-import HomeScreen, { CustomText } from '@/app/(tabs)/index';
+import HomeScreen from '@/app/index';
 
-// Simple unit test for CustomText component
-describe('<CustomText />', () => {
-  test('CustomText renders correctly', () => {
-    const { getByText } = render(<CustomText>Hello World</CustomText>);
-    expect(getByText('Hello World')).toBeTruthy();
-  });
+// Mock the convex API
+jest.mock('@/convex/_generated/api', () => ({
+  api: {
+    chat: {},
+    agents: {},
+  },
+}));
 
-  test('CustomText snapshot', () => {
-    const tree = render(<CustomText>Some text</CustomText>).toJSON();
-    expect(tree).toMatchSnapshot();
-  });
-
-  test('CustomText displays children correctly', () => {
-    const { getByText } = render(<CustomText>Test message</CustomText>);
-    expect(getByText('Test message')).toBeTruthy();
-  });
+// Mock ChatView component to avoid complex dependencies
+jest.mock('@/components/ChatView', () => {
+  return jest.fn(() => null);
 });
 
 // Test HomeScreen component without rendering it to avoid reanimated issues for now
@@ -25,5 +20,15 @@ describe('<HomeScreen /> - Component Tests', () => {
   test('HomeScreen component exists', () => {
     // Test that the component can be imported
     expect(HomeScreen).toBeDefined();
+  });
+
+  test('HomeScreen is a React component', () => {
+    expect(typeof HomeScreen).toBe('function');
+  });
+
+  test('HomeScreen can be instantiated', () => {
+    const component = React.createElement(HomeScreen);
+    expect(component).toBeDefined();
+    expect(component.type).toBe(HomeScreen);
   });
 });

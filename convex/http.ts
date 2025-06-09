@@ -1,28 +1,21 @@
 import { PersistentTextStreaming } from "@convex-dev/persistent-text-streaming";
 import { httpRouter } from "convex/server";
-import { components } from "./_generated/api";
+import { components, internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
-import { auth } from "./auth";
 
 const persistentTextStreaming = new PersistentTextStreaming(components.persistentTextStreaming);
 
 const http = httpRouter();
 
 export const streamChat = httpAction(async (ctx, request) => {
-  const { streamId, prompt, model = "gemini-1.5-flash-latest", conversationHistory = [] } = await request.json();
-  
-  console.log("=== STREAM CHAT START ===");
-  console.log("StreamId:", streamId);
-  console.log("Model:", model);
-  console.log("Prompt:", prompt.substring(0, 100) + "...");
-  console.log("Conversation history length:", conversationHistory.length);
+  const { streamId, prompt, model = "gemini-1.5-flash-latest", conversationHistory = [], chatId } = await request.json();
   
   return persistentTextStreaming.stream(
     ctx,
     request,
     streamId,
     async (ctx, request, streamId, chunkAppender) => {
-      await streamWithOpenAIFormat(prompt, chunkAppender, model, conversationHistory);
+      await streamWithOpenAIFormat(prompt, chunkAppender, model, conversationHistory, ctx, chatId);
     }
   );
 });
@@ -31,11 +24,10 @@ async function streamWithOpenAIFormat(
   prompt: string, 
   chunkAppender: (chunk: string) => Promise<void>, 
   model: string, 
-  conversationHistory: {role: string, content: string}[] = []
+  conversationHistory: {role: string, content: string}[] = [],
+  ctx?: any,
+  chatId?: string
 ) {
-  console.log("=== STREAMING START ===");
-  console.log("Model:", model);
-  
   let apiKey: string | undefined;
   let baseURL: string;
   let actualModel: string;
@@ -61,8 +53,6 @@ async function streamWithOpenAIFormat(
       await chunkAppender("Error: Google Gemini API key not configured");
       return;
     }
-    
-    console.log("Using Gemini via OpenAI compatibility");
   } else if (model.startsWith("gpt")) {
     // Use OpenAI directly
     apiKey = process.env.OPENAI_API_KEY;
@@ -84,15 +74,20 @@ async function streamWithOpenAIFormat(
       await chunkAppender("Error: OpenAI API key not configured");
       return;
     }
-    
-    console.log("Using OpenAI directly");
   } else {
     await chunkAppender("Error: Unsupported model selected");
     return;
   }
+
+  let completeResponse = ""; // Track the complete response
+
   try {
     // Build messages array with conversation history
     const messages = [
+      {
+        role: "system",
+        content: "You are a helpful AI assistant. Please respond to the user's queries."
+      },
       ...conversationHistory.map(msg => ({
         role: msg.role,
         content: msg.content
@@ -110,8 +105,6 @@ async function streamWithOpenAIFormat(
       temperature: 0.7,
     };
     
-    console.log("Making API request to:", `${baseURL}chat/completions`);
-    
     const response = await fetch(`${baseURL}chat/completions`, {
       method: "POST",
       headers: {
@@ -121,12 +114,9 @@ async function streamWithOpenAIFormat(
       body: JSON.stringify(requestBody),
     });
 
-    console.log("Response status:", response.status);
-
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("API request failed:", response.status, response.statusText);
-      console.error("Error response:", errorText);
+      console.error("API request failed:", response.status, response.statusText, errorText);
       await chunkAppender(`Error: API request failed with status ${response.status}: ${errorText}`);
       return;
     }
@@ -140,18 +130,14 @@ async function streamWithOpenAIFormat(
       return;
     }
 
-    console.log("Starting to read stream...");
-    let chunkCount = 0;
     let buffer = "";
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
-        console.log("Stream completed, total chunks:", chunkCount);
         break;
       }
 
-      chunkCount++;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       
@@ -167,14 +153,41 @@ async function streamWithOpenAIFormat(
             const parsed = JSON.parse(data);
             const content = parsed.choices?.[0]?.delta?.content;
             if (content) {
+              completeResponse += content; // Accumulate the complete response
               await chunkAppender(content);
-            }          } catch {
+            }
+          } catch {
             // Skip invalid JSON chunks
             continue;
           }
         }
       }
+    }    // After streaming is complete, save the response directly if we have chatId
+    if (ctx && chatId && completeResponse.trim()) {
+      try {
+        console.log("HTTP: Attempting to save AI response", {
+          chatId,
+          contentLength: completeResponse.length,
+          model
+        });
+        
+        await ctx.runMutation(internal.chat.saveAIResponse, {
+          chatId,
+          content: completeResponse.trim(),
+          model,
+        });
+        console.log("HTTP: AI response saved successfully");
+      } catch (error) {
+        console.error("HTTP: Error saving complete AI response:", error);
+      }
+    } else if (!chatId) {
+      console.log("HTTP: No chatId provided, skipping save");
+    } else if (!completeResponse.trim()) {
+      console.log("HTTP: No response content to save");
+    } else {
+      console.log("HTTP: Missing context, skipping save");
     }
+    
   } catch (error) {
     console.error("Streaming error:", error);
     if (error instanceof Error) {
@@ -193,8 +206,5 @@ http.route({
   method: "POST", 
   handler: streamChat,
 });
-
-// Add authentication routes
-auth.addHttpRoutes(http);
 
 export default http;

@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Keyboard, KeyboardEvent, SafeAreaView, ScrollView, View } from "react-native";
+import React, { useCallback, useEffect, useRef } from "react";
+import { Keyboard, KeyboardEvent, SafeAreaView, ScrollView } from "react-native";
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useChat } from "../hooks/useChat";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ChatHistoryModal } from "./chat/ChatHistoryModal";
@@ -12,15 +13,20 @@ interface ChatViewProps {
   userName?: string;
 }
 
-const ChatView: React.FC<ChatViewProps> = ({ userName = "vishal" }) => {
-  // Keyboard height state
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+const ChatView: React.FC<ChatViewProps> = ({ userName = "user" }) => {
+  // Keyboard height state with animated value for smooth transitions
   const scrollViewRef = useRef<ScrollView>(null);
-    const scrollToBottom = useCallback(() => {
-    scrollViewRef.current?.scrollToEnd({ animated: true });
+  const keyboardAnimatedHeight = useSharedValue(0);
+  
+  const scrollToBottom = useCallback(() => {
+    // Use requestAnimationFrame for smoother scrolling
+    requestAnimationFrame(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    });
   }, []);
 
-  const {    // State
+  const {
+    // State
     messages,
     inputText,
     isCreatingChat,
@@ -29,7 +35,7 @@ const ChatView: React.FC<ChatViewProps> = ({ userName = "vishal" }) => {
     showChatHistory,
     useAgent,
     chatHistory,
-      // Actions
+    // Actions
     setInputText,
     setSelectedModel,
     setShowModelModal,
@@ -41,19 +47,20 @@ const ChatView: React.FC<ChatViewProps> = ({ userName = "vishal" }) => {
     loadChat,
     handleDeleteChat,
   } = useChat(userName, scrollToBottom);
-  // Listen to keyboard events
+  // Optimized keyboard handling with animated transitions
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
       'keyboardDidShow',
       (e: KeyboardEvent) => {
-        setKeyboardHeight(e.endCoordinates.height);
+        const height = e.endCoordinates.height;
+        keyboardAnimatedHeight.value = withTiming(height, { duration: 250 });
       }
     );
     
     const keyboardDidHideListener = Keyboard.addListener(
       'keyboardDidHide',
       () => {
-        setKeyboardHeight(0);
+        keyboardAnimatedHeight.value = withTiming(0, { duration: 250 });
       }
     );
 
@@ -61,37 +68,46 @@ const ChatView: React.FC<ChatViewProps> = ({ userName = "vishal" }) => {
       keyboardDidShowListener?.remove();
       keyboardDidHideListener?.remove();
     };
-  }, []);
+  }, [keyboardAnimatedHeight]);
 
-  // Auto-scroll to bottom when messages change or streaming
+  // Optimized auto-scroll with debouncing
   useEffect(() => {
     if (messages.length > 0) {
-      const timer = setTimeout(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-      return () => clearTimeout(timer);
+      // Debounced scroll to improve performance
+      const timeoutId = setTimeout(() => {
+        requestAnimationFrame(() => {
+          scrollViewRef.current?.scrollToEnd({ animated: true });
+        });
+      }, 50);
+      return () => clearTimeout(timeoutId);
     }
-  }, [messages]);
+  }, [messages.length]); // Only depend on messages length, not full messages array
 
-  const handleActionButton = (action: string) => {
+  const handleActionButton = useCallback((action: string) => {
     // Handle action button press
-    console.log(`${action} button pressed`);
-  };
-  const handleMenuPress = () => {
+    // Could trigger different flows based on action type
+  }, []);
+
+  const handleMenuPress = useCallback(() => {
     setShowChatHistory(true);
-  };
+  }, [setShowChatHistory]);
 
-  const handleSearchPress = () => {
-    console.log("Search pressed");
-  };
+  const handleSearchPress = useCallback(() => {
+    // Handle search functionality
+  }, []);
 
-  const handleGlobePress = () => {
+  const handleGlobePress = useCallback(() => {
     console.log("Globe pressed");
-  };
+  }, []);
 
-  const handleAttachPress = () => {
+  const handleAttachPress = useCallback(() => {
     console.log("Attach pressed");
-  };  return (
+  }, []);
+
+  // Animated style for keyboard padding
+  const keyboardStyle = useAnimatedStyle(() => ({
+    paddingBottom: keyboardAnimatedHeight.value,
+  }));return (
     <SafeAreaView className="flex-1 bg-app-dark-background pt-5">      {/* Top Bar */}
       <ChatHeader
         onMenuPress={handleMenuPress}
@@ -100,7 +116,7 @@ const ChatView: React.FC<ChatViewProps> = ({ userName = "vishal" }) => {
         useAgent={useAgent}
         onToggleAgent={setUseAgent}
       />      {/* Main Content Container */}
-      <View className="flex-1" style={{ paddingBottom: keyboardHeight }}>
+      <Animated.View className="flex-1" style={keyboardStyle}>
         {/* Messages Container with ScrollView */}
         <ScrollView
           ref={scrollViewRef}
@@ -110,7 +126,9 @@ const ChatView: React.FC<ChatViewProps> = ({ userName = "vishal" }) => {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           bounces={false}
-        >          {messages.length === 0 ? (
+          removeClippedSubviews={true}
+          scrollEventThrottle={16}
+        >{messages.length === 0 ? (
             <WelcomeScreen
               userName={userName}
               onActionPress={handleActionButton}
@@ -118,8 +136,7 @@ const ChatView: React.FC<ChatViewProps> = ({ userName = "vishal" }) => {
             />
           ) : (
             <MessageList messages={messages} />
-          )}
-        </ScrollView>
+          )}        </ScrollView>
 
         {/* Fixed Bottom Input Bar */}
         <ChatInput
@@ -133,7 +150,7 @@ const ChatView: React.FC<ChatViewProps> = ({ userName = "vishal" }) => {
           isCreatingChat={isCreatingChat}
           useAgent={useAgent}
         />
-      </View>
+      </Animated.View>
         {/* Model Selection Modal */}
       <ModelSelectorModal
         visible={showModelModal}

@@ -11,6 +11,19 @@ jest.mock('nativewind', () => ({
   useAppColorScheme: jest.fn(),
 }));
 
+// Mock Convex
+jest.mock('convex/react', () => ({
+  ConvexProvider: ({ children }) => children,
+  useQuery: jest.fn(() => undefined),
+  useMutation: jest.fn(() => jest.fn()),
+  useAction: jest.fn(() => jest.fn()),
+  ConvexReactClient: jest.fn().mockImplementation(() => ({})),
+}));
+
+// Global environment setup
+global.__DEV__ = true;
+global.fetch = require('node-fetch');
+
 // Mock Expo modules that might not be available in the test environment
 
 jest.mock('expo-constants', () => ({

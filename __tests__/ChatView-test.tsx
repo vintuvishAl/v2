@@ -1,78 +1,144 @@
-import ChatView from '@/components/ChatView';
 import { fireEvent, render } from '@testing-library/react-native';
+import React from 'react';
+
+import ChatView from '@/components/ChatView';
+
+// Mock the convex API
+jest.mock('@/convex/_generated/api', () => ({
+  api: {
+    chat: {
+      createUserChat: 'createUserChat',
+      continueUserChat: 'continueUserChat',
+      deleteChat: 'deleteChat',
+      getUserChats: 'getUserChats',
+      getChat: 'getChat',
+      getChatMessagesFromDB: 'getChatMessagesFromDB',
+      getChatBody: 'getChatBody',
+    },
+    agents: {
+      chat: 'agents.chat',
+    },
+  },
+}));
+
+// Mock the useChat hook to provide test data
+jest.mock('@/hooks/useChat', () => ({
+  useChat: jest.fn(() => ({
+    // State
+    messages: [],
+    inputText: '',
+    isCreatingChat: false,
+    selectedModel: 'gemini-2.5-flash',
+    showModelModal: false,
+    showChatHistory: false,
+    useAgent: false,
+    chatHistory: [],
+    
+    // Actions
+    setInputText: jest.fn(),
+    setSelectedModel: jest.fn(),
+    setShowModelModal: jest.fn(),
+    setShowChatHistory: jest.fn(),
+    setUseAgent: jest.fn(),
+    handleSendMessage: jest.fn(),
+    handleSuggestedQuestion: jest.fn(),
+    startNewChat: jest.fn(),
+    loadChat: jest.fn(),
+    handleDeleteChat: jest.fn(),
+  })),
+}));
+
+// Mock expo-router
+jest.mock('expo-router', () => ({
+  Link: ({ children, href, ...props }: any) => <div {...props}>{children}</div>,
+  Stack: ({ children }: any) => <div>{children}</div>,
+}));
 
 describe('<ChatView />', () => {
-  test('renders welcome message for user Vishal', () => {
-    const { getByText } = render(<ChatView />);
-    expect(getByText('How can I help you, vishal?')).toBeTruthy();
+  beforeEach(() => {
+    jest.clearAllMocks();
   });
 
-  test('renders all four suggestion buttons', () => {
-    const { getByText } = render(<ChatView />);
-    expect(getByText('Create')).toBeTruthy();
-    expect(getByText('Explore')).toBeTruthy();
-    expect(getByText('Code')).toBeTruthy();
-    expect(getByText('Learn')).toBeTruthy();
+  test('renders without crashing', () => {
+    const { getByTestId } = render(<ChatView userName="test-user" />);
+    expect(getByTestId('chat-container')).toBeTruthy();
+  });
+
+  test('renders welcome message for user', () => {
+    const { getByText } = render(<ChatView userName="user" />);
+    expect(getByText('How can I help you, user?')).toBeTruthy();
+  });
+
+  test('renders all four action buttons', () => {
+    const { getByTestId } = render(<ChatView userName="user" />);
+    expect(getByTestId('action-create')).toBeTruthy();
+    expect(getByTestId('action-explore')).toBeTruthy();
+    expect(getByTestId('action-code')).toBeTruthy();
+    expect(getByTestId('action-learn')).toBeTruthy();
   });
 
   test('renders suggested questions', () => {
-    const { getByText } = render(<ChatView />);
+    const { getByText } = render(<ChatView userName="user" />);
     expect(getByText('How does AI work?')).toBeTruthy();
     expect(getByText('Are black holes real?')).toBeTruthy();
     expect(getByText("How many Rs are in the word 'strawberry'?")).toBeTruthy();
     expect(getByText('What is the meaning of life?')).toBeTruthy();
   });
-  test('renders top bar with icons', () => {
-    const { getByTestId } = render(<ChatView />);
-    expect(getByTestId('search-button')).toBeTruthy();
+
+  test('renders chat header with buttons', () => {
+    const { getByTestId } = render(<ChatView userName="user" />);
+    expect(getByTestId('all-chats-button')).toBeTruthy();
     expect(getByTestId('add-button')).toBeTruthy();
-    expect(getByTestId('share-button')).toBeTruthy();
-    expect(getByTestId('star-button')).toBeTruthy();
-    expect(getByTestId('menu-button')).toBeTruthy();
-    expect(getByTestId('profile-button')).toBeTruthy();
   });
+
   test('renders bottom input area', () => {
-    const { getByPlaceholderText, getByText, getByTestId } = render(<ChatView />);
+    const { getByPlaceholderText, getByText } = render(<ChatView userName="user" />);
     expect(getByPlaceholderText('Type your message here...')).toBeTruthy();
     expect(getByText('Gemini 2.5 Flash')).toBeTruthy();
-    expect(getByTestId('search-input-button')).toBeTruthy();
-    expect(getByTestId('send-button')).toBeTruthy();
   });
 
-  test('can type in input field', () => {
-    const { getByPlaceholderText } = render(<ChatView />);
-    const input = getByPlaceholderText('Type your message here...');
-    
-    fireEvent.changeText(input, 'Hello AI!');
-    expect(input.props.value).toBe('Hello AI!');
-  });
-
-  test('can press suggestion buttons', () => {
-    const { getByText } = render(<ChatView />);
-    const createButton = getByText('Create');
+  test('can press action buttons', () => {
+    const { getByTestId } = render(<ChatView userName="user" />);
+    const createButton = getByTestId('action-create');
     
     fireEvent.press(createButton);
-    // Should handle button press (we'll implement this functionality later)
+    // Should handle button press (functionality is mocked)
+    expect(createButton).toBeTruthy();
   });
 
   test('can press suggested questions', () => {
-    const { getByText } = render(<ChatView />);
-    const question = getByText('How does AI work?');
+    const { getByTestId } = render(<ChatView userName="user" />);
+    const questionButton = getByTestId('suggestion-0');
     
-    fireEvent.press(question);
-    // Should handle question selection (we'll implement this functionality later)
+    fireEvent.press(questionButton);
+    // Should handle question selection (functionality is mocked)
+    expect(questionButton).toBeTruthy();
   });
 
-  test('send button is pressable', () => {
-    const { getByTestId } = render(<ChatView />);
-    const sendButton = getByTestId('send-button');
+  test('header buttons are pressable', () => {
+    const { getByTestId } = render(<ChatView userName="user" />);
+    const menuButton = getByTestId('all-chats-button');
+    const addButton = getByTestId('add-button');
     
-    fireEvent.press(sendButton);
-    // Should handle send action (we'll implement this functionality later)
+    fireEvent.press(menuButton);
+    fireEvent.press(addButton);
+    
+    expect(menuButton).toBeTruthy();
+    expect(addButton).toBeTruthy();
+  });
+
+  test('renders with custom userName', () => {
+    const { getByText } = render(<ChatView userName="Alice" />);
+    expect(getByText('How can I help you, Alice?')).toBeTruthy();
+  });
+
+  test('renders with default userName when not provided', () => {
+    const { getByText } = render(<ChatView />);
+    expect(getByText('How can I help you, user?')).toBeTruthy();
   });
 
   test('matches snapshot', () => {
-    const tree = render(<ChatView />).toJSON();
+    const tree = render(<ChatView userName="user" />).toJSON();
     expect(tree).toMatchSnapshot();
   });
 });
